@@ -7,22 +7,22 @@ A live LaTeX preview for VS Code that keeps up with your typing. It is built on
 re-typesets only the paragraph you are editing, in about a millisecond. Page breaks,
 references and bibliographies follow from a full compile in the background.
 
-![Live preview next to the editor](docs/screenshot.png)
+![Typing in the editor; the preview follows every keystroke](docs/demo.gif)
 
 ## Quick start
 
-1. Open a folder with a LaTeX project. On Linux or macOS it is used directly; on Windows, open the folder in WSL.
+1. Open a folder with a LaTeX project. Linux, macOS and Windows are supported.
 2. Open a `.tex` file and click the **preview icon** in the editor title bar, or press **Ctrl+Alt+V** (**Cmd+Alt+V** on Mac).
 3. Start typing.
 
 On first use, the preview walks you through anything that is missing:
 
-- **rtex is not installed.** Click **Install rtex**. It is built from source with Rust's `cargo`, takes a few minutes, and only happens once.
+- **rtex is not installed.** Click **Install rtex**. It downloads the prebuilt engine of the latest [realtime-tex release](https://github.com/HenryXiaoYang/realtime-tex/releases) for your platform (a few MB) and checks its SHA-256. Prefer to build it yourself? **Build from Source** clones realtime-tex `main` and builds it with Rust's `cargo` (a few minutes; on Windows it also needs [Git for Windows](https://git-scm.com/download/win) and the Visual Studio C++ Build Tools that [rustup](https://rustup.rs) asks for). The `realtimeTex.installFrom` setting picks which one **Install rtex** does.
 - **LuaLaTeX was not found.** Choose your TeX Live `bin` folder, or let the extension install a minimal TeX Live 2026.
 
 **Realtime TeX: Check Setup** in the command palette checks everything and offers a fix for each problem.
 
-The extension keeps the rtex it installed up to date. It checks once a day and offers **Update Now**. **Realtime TeX: Update rtex Engine** updates on demand: it pulls the latest realtime-tex, rebuilds it and restarts the engine. The `realtimeTex.updateCheck` setting controls this.
+The extension keeps the rtex it installed up to date, the way it was installed: a downloaded rtex updates to the latest release, one built from source pulls realtime-tex `main` and rebuilds it. It checks once a day and offers **Update Now**; **Realtime TeX: Update rtex Engine** updates on demand and restarts the engine. The `realtimeTex.updateCheck` setting controls this.
 
 ## Using the preview
 
@@ -58,7 +58,7 @@ keystroke. Everything else updates with the next full compile, typically a secon
 - new page breaks.
 
 The pill says when this is happening. See rtex's
-[limitations](https://github.com/HenryXiaoYang/realtime-tex/blob/main/docs/LIMITATIONS.md) for details.
+[live editing guide](https://github.com/HenryXiaoYang/realtime-tex/blob/main/docs/live-editing.md) for details.
 
 For the fastest updates, use TFM fonts (the default, `lmodern`, …) or OpenType fonts loaded with
 `Renderer=Basic`. fontspec's default node mode works, but each keystroke takes longer.
@@ -86,12 +86,13 @@ PDF, as before.
 |---|---|---|
 | `realtimeTex.serverPath` | *(auto)* | rtex binary. Empty means the one installed by **Install rtex**, then `rtex` on `PATH`. |
 | `realtimeTex.texliveBin` | *(PATH)* | Folder containing `lualatex`. |
-| `realtimeTex.texDir` | *(auto)* | rtex's `tex/` folder. Only needed if you moved the binary away from its checkout. |
-| `realtimeTex.updateCheck` | `notify` | Once a day, check the engine's repository and branch for a newer engine: `notify` offers the update, `auto` updates and rebuilds by itself, `off` never checks. The setting has an **Update rtex now** link. |
-| `realtimeTex.engine.repository` | *(realtime-tex)* | Git repository **Install rtex** and **Update rtex Engine** build from, e.g. a fork. |
-| `realtimeTex.engine.branch` | `main` | Branch of that repository. Changing either and running **Update rtex Engine** switches the managed checkout. |
+| `realtimeTex.texDir` | *(auto)* | rtex's `tex/` support files. Only needed if you moved the binary away from them. |
+| `realtimeTex.installFrom` | `release` | What **Install rtex** does: `release` downloads the prebuilt engine, `source` builds `realtimeTex.engine.repository` with `cargo`. |
+| `realtimeTex.updateCheck` | `notify` | Once a day, check for a newer engine (a new release, or new commits on the engine's repository and branch for a source build): `notify` offers the update, `auto` updates by itself, `off` never checks. The setting has an **Update rtex now** link. |
+| `realtimeTex.engine.repository` | *(realtime-tex)* | Git repository the engine comes from, e.g. a fork: built from source, and when it is on GitHub, the repository whose releases **Install rtex** downloads. |
+| `realtimeTex.engine.branch` | `main` | Branch of that repository for source builds. Changing either and running **Update rtex Engine** switches the managed checkout. |
 | `realtimeTex.engine.eligibility` | `probe` | How rtex picks the parts that update live: `probe` (compare a live result with the last full compile) or `allowlist` (only known-safe commands). |
-| `realtimeTex.engine.fastBudgetMs` | `5` | Time budget for re-typesetting one part live; a part that takes longer three times in a row waits for the full compile. |
+| `realtimeTex.engine.fastBudgetMs` | `50` | Time budget for re-typesetting one part live; a part that takes longer three times in a row waits for the full compile. |
 | `realtimeTex.engine.fastBudgetFactor` | `4` | The budget follows the document: a part is only too slow when it also takes longer than this many times the document's typical live update (`0`: the fixed budget alone). |
 | `realtimeTex.engine.passTimeoutSeconds` | `120` | A full compile still running after this long is stopped (a document that loops forever). |
 | `realtimeTex.engine.pictureCache` | `true` | Reuse unchanged TikZ pictures from the previous full compile. |
@@ -120,6 +121,7 @@ All commands are under **Realtime TeX:** in the command palette:
 - **Show Log**
 - **Open Debug Folder**
 - **Check Setup**
+- **Install rtex**
 - **Install rtex (Build from Source)**
 - **Update rtex Engine**
 - **Locate rtex Binary…**
@@ -147,6 +149,22 @@ RTEX_E2E_TEXLIVE_BIN=/path/to/texlive/2026/bin/x86_64-linux \
 xvfb-run -a npm run test:e2e
 ```
 
+On macOS and Windows, run `npm run test:e2e` without `xvfb-run`. The **E2E** workflow runs the suite on
+Linux, macOS and Windows against the latest realtime-tex.
+
+### Releasing
+
+Set `version` in `package.json` and add a `## <version>` section to `CHANGELOG.md`, then push a
+matching tag:
+
+```bash
+git tag v0.0.1 && git push origin v0.0.1
+```
+
+The **Release** workflow builds the `.vsix`, checks that the tag matches `package.json`, and
+creates the GitHub release with the changelog section as notes and the `.vsix` (plus its
+SHA-256) attached. Publishing a release in the GitHub UI, or running the workflow by hand with a
+tag, attaches the `.vsix` to an existing release.
 ### Render check
 
 `test/render` draws rtex page lists with the preview's own drawing code in headless Chromium and
