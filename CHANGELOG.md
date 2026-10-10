@@ -11,6 +11,10 @@
 - `realtimeTex.engine.repository` and `realtimeTex.engine.branch`: build the managed engine from a
   fork or a branch; **Update rtex Engine** and the daily check follow them.
 - Render check (`npm run build:render`, `test/render/`): the preview's drawing code against MuPDF.
+- CMYK colors (text and drawings) are converted the way pdf.js converts them, so a page looks the
+  same drawn natively or from the PDF (CMYK magenta was #ff00ff before).
+- Glyphs LuaTeX does not write to the PDF (a font with no name or file, such as pgf's `\nullfont`;
+  a character an OpenType font lacks) are skipped instead of sending the page to the PDF.
 
 ## 0.0.1
 
