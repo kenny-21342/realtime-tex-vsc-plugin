@@ -108,3 +108,19 @@ test('cached pictures in a live unit move with their row', () => {
   const other = line(0, 30, { items: [['u', 'cached_picture', `9 0 0 ${5 * U} ${5 * U}`]] });
   assert.deepEqual(cachedPictureMoves(page, [{ line: other, dx: 0, dy: 0 }]), []);
 });
+
+test('a natively drawn page names its pictures by key; live items carry the key', () => {
+  assert.deepEqual(cachedPicture(['u', 'cached_picture', '3 100 200 300 400 main.tex:12']), { index: 3, x: 100, y: 200, w: 300, h: 400, key: 'main.tex:12' });
+  // two pictures of the same size: the key decides (index and order would pick the first)
+  const page: DisplayList = {
+    ...dl([]),
+    pictures: [
+      { key: 'main.tex:5', x: 10 * U, top: 50 * U, width: 80 * U, height: 30 * U },
+      { key: 'main.tex:9', x: 10 * U, top: 300 * U, width: 80 * U, height: 30 * U },
+    ],
+  };
+  const unitLine = line(0, 30, { items: [['u', 'cached_picture', `1 0 0 ${80 * U} ${30 * U} main.tex:9`]] });
+  assert.deepEqual(cachedPictureMoves(page, [{ line: unitLine, dx: 10 * U, dy: 310 * U }]), [
+    { src: { x: 10 * U, y: 300 * U, w: 80 * U, h: 30 * U }, dst: { x: 10 * U, y: 310 * U, w: 80 * U, h: 30 * U } },
+  ]);
+});

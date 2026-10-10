@@ -1,7 +1,8 @@
 // Drawing rtex display lists (docs/DISPLAY_LIST.md, "Rendering rules") on a 2D canvas.
 import * as opentype from 'opentype.js';
 import { fontKey, FontResource, ImageResource } from '../src/fontKey';
-import type { DisplayList, FontDesc, ImageInfo, Item, Line } from '../src/protocol';
+import type { DisplayList, FontDesc, GfxOp, ImageInfo, Item, Line, Seg } from '../src/protocol';
+import { axialBand, cssColor, RowNative } from './native';
 
 /** Affine map [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f. */
 export type Mat = [number, number, number, number, number, number];
@@ -41,6 +42,18 @@ export function pdfColor(data: string): string | undefined {
     else stroke ??= css;
   }
   return fill ?? stroke;
+}
+
+/** A native path (user space) as a canvas path. */
+function pathOf(segs: Seg[]): Path2D {
+  const p = new Path2D();
+  for (const s of segs) {
+    if (s.s === 'M') p.moveTo(s.x, s.y);
+    else if (s.s === 'L') p.lineTo(s.x, s.y);
+    else if (s.s === 'C') p.bezierCurveTo(s.x1, s.y1, s.x2, s.y2, s.x, s.y);
+    else p.closePath();
+  }
+  return p;
 }
 
 function rgb(r: number, g: number, b: number): string | undefined {
@@ -161,10 +174,11 @@ export function imageInfo(dl: DisplayList, index: number): ImageInfo | undefined
   return key === undefined ? undefined : infos[String(key)];
 }
 
-/** Why a display list cannot be drawn exactly (undefined when it can). */
-export function inexactReason(dl: DisplayList, fonts: FontStore, images: ImageStore, lines?: Iterable<Line>): string | undefined {
+/** Why a display list cannot be drawn exactly (undefined when it can). `native`: the page comes
+ * with rtex's native drawing, which takes care of its literals and shadings. */
+export function inexactReason(dl: DisplayList, fonts: FontStore, images: ImageStore, lines?: Iterable<Line>, native = false): string | undefined {
   const flags = dl.flags && typeof dl.flags === 'object' ? Object.keys(dl.flags as object) : [];
-  if (flags.length && !Array.isArray(dl.flags)) return `contains material the live renderer cannot draw (${flags.join(', ')})`;
+  if (flags.length && !Array.isArray(dl.flags) && !native) return `contains material the live renderer cannot draw (${flags.join(', ')})`;
   const check = (items: Item[]): string | undefined => {
     for (const it of items) {
       if (it[0] === 'g') {
@@ -179,6 +193,8 @@ export function inexactReason(dl: DisplayList, fonts: FontStore, images: ImageSt
         if (!info) return 'an image has no source file';
         if (!im || im.kind === 'pending') return 'images are loading';
         if (im.kind === 'missing') return im.reason;
+      } else if (native && (it[0] === 'l' || (it[0] === 'u' && it[1] === 'shading'))) {
+        // drawn from the native operations
       } else if (it[0] === 'l' || it[0] === 'u') {
         return 'contains drawing commands (e.g. TikZ) the live renderer cannot draw';
       }
@@ -208,10 +224,105 @@ export class Painter {
     private readonly images: ImageStore,
   ) {}
 
-  /** Draw `items` of `dl` translated by (dx, dy) sp. */
-  draw(dl: DisplayList, items: readonly Item[], dx = 0, dy = 0): void {
+  /** Draw `items` of `dl` translated by (dx, dy) sp. `native`: the row's native drawing (page
+   * lists only, never translated): its operations run after the item they follow, and items a
+   * transformed scope moved are drawn through their transform. */
+  draw(dl: DisplayList, items: readonly Item[], dx = 0, dy = 0, native?: RowNative): void {
     const ctx = this.ctx;
-    for (const it of items) {
+    const saved = this.cur;
+    native?.after.get(-1)?.forEach((op) => this.gfx(op));
+    for (let k = 0; k < items.length; k++) {
+      const it = items[k];
+      const moved = native?.transforms.get(k);
+      if (moved) {
+        this.cur = moved;
+        this.drawItem(dl, it, dx, dy);
+        this.cur = saved;
+      } else this.drawItem(dl, it, dx, dy);
+      const ops = native?.after.get(k);
+      if (ops) for (const op of ops) this.gfx(op);
+    }
+  }
+
+  /** One native drawing operation (Save/Restore bracket the canvas state, so a clip holds for
+   * everything drawn until its Restore, glyphs included). */
+  private gfx(op: GfxOp): void {
+    const ctx = this.ctx;
+    if (op.op === 'Save') {
+      ctx.save();
+      return;
+    }
+    if (op.op === 'Restore') {
+      ctx.restore();
+      return;
+    }
+    const m = mul(this.base, op.ctm);
+    ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    if (op.op === 'Clip') {
+      ctx.clip(pathOf(op.path), op.even_odd ? 'evenodd' : 'nonzero');
+      return;
+    }
+    if (op.op === 'Paint') {
+      const path = pathOf(op.path);
+      if (op.fill) {
+        ctx.fillStyle = cssColor(op.fill);
+        ctx.fill(path, op.even_odd ? 'evenodd' : 'nonzero');
+      }
+      const st = op.stroke;
+      if (st) {
+        const scale = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
+        // PDF: a zero width is the thinnest line the device can draw
+        ctx.lineWidth = st.width > 0 ? Math.max(st.width, 0.35 / scale) : 1 / scale;
+        ctx.lineCap = (['butt', 'round', 'square'] as const)[st.cap] ?? 'butt';
+        ctx.lineJoin = (['miter', 'round', 'bevel'] as const)[st.join] ?? 'miter';
+        ctx.miterLimit = st.miter_limit;
+        ctx.setLineDash(st.dash.some((v) => v > 0) ? st.dash : []);
+        ctx.lineDashOffset = st.dash_phase;
+        ctx.strokeStyle = cssColor(st.color);
+        ctx.stroke(path);
+        ctx.setLineDash([]);
+      }
+      return;
+    }
+    // Shade: a gradient over the form's box, inside the current clip
+    const [x0, y0, x1, y1] = op.bbox;
+    ctx.save();
+    const box = new Path2D();
+    box.rect(x0, y0, x1 - x0, y1 - y0);
+    ctx.clip(box);
+    const c = op.coords;
+    let g: CanvasGradient;
+    if (op.radial) {
+      g = ctx.createRadialGradient(c[0], c[1], Math.max(0, c[2]), c[3], c[4], Math.max(0, c[5]));
+      // canvas gradients always extend; PDF paints nothing beyond an unextended end circle
+      if (!op.extend[1]) {
+        const outer = new Path2D();
+        outer.arc(c[3], c[4], Math.max(0, c[5]), 0, 2 * Math.PI);
+        ctx.clip(outer);
+      }
+    } else {
+      g = ctx.createLinearGradient(c[0], c[1], c[2], c[3]);
+      if (!op.extend[0] || !op.extend[1]) {
+        const band = axialBand(c, op.bbox);
+        if (band) {
+          const b = new Path2D();
+          b.moveTo(band[0][0], band[0][1]);
+          for (const [x, y] of band.slice(1)) b.lineTo(x, y);
+          b.closePath();
+          ctx.clip(b);
+        }
+      }
+    }
+    for (const [t, col] of op.stops) g.addColorStop(Math.max(0, Math.min(1, t)), cssColor(col, 1));
+    ctx.globalAlpha = Math.max(0, Math.min(1, op.alpha));
+    ctx.fillStyle = g;
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.restore();
+  }
+
+  private drawItem(dl: DisplayList, it: Item, dx: number, dy: number): void {
+    const ctx = this.ctx;
+    {
       switch (it[0]) {
         case 'g': {
           const [, font, char, index, x, y, , ef] = it as [string, number, number, number | null, number, number, number, number];

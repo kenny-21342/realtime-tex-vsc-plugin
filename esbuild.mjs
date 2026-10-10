@@ -20,6 +20,10 @@ async function copyWorker() {
 
 if (args.has('--e2e')) {
   await esbuild.build({ ...common, logLevel: 'warning', entryPoints: ['test/e2e/runTest.ts', 'test/e2e/suite.ts'], outdir: 'out/e2e', platform: 'node', format: 'cjs', target: 'node18', external: ['vscode', '@vscode/test-electron'] });
+} else if (args.has('--render')) {
+  // The render check (test/render): the preview's drawing code in a browser page, and its node driver.
+  await esbuild.build({ ...common, logLevel: 'warning', entryPoints: ['test/render/harness.ts'], outfile: 'out/render/harness.js', platform: 'browser', format: 'iife', target: 'chrome114' });
+  await esbuild.build({ ...common, logLevel: 'warning', entryPoints: ['test/render/run.ts'], outfile: 'out/render/run.js', platform: 'node', format: 'cjs', target: 'node18', external: ['playwright-core'] });
 } else if (args.has('--tests')) {
   const tests = (await readdir('test')).filter((f) => f.endsWith('.test.ts')).map((f) => `test/${f}`);
   await esbuild.build({ ...common, logLevel: 'warning', entryPoints: tests, outdir: 'out/test', platform: 'node', format: 'cjs', target: 'node18', external: ['vscode'] });

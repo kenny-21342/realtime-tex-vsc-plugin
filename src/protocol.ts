@@ -68,6 +68,17 @@ export interface DisplayList {
   page?: number | null;
   page_width?: Sp;
   page_height?: Sp;
+  /** Pictures the page draws from the picture cache's stored drawing (native drawing): where
+   * each is, by cache key (`file:line`). */
+  pictures?: PictureSpot[];
+}
+
+export interface PictureSpot {
+  key: string;
+  x: Sp;
+  top: Sp;
+  width: Sp;
+  height: Sp;
 }
 
 export interface Fragment {
@@ -92,6 +103,71 @@ export interface PageUpdate {
   exact: boolean;
   hash: number;
   dl: DisplayList;
+  /** A degraded page rtex can draw without its PDF (TikZ/pgf literals and shadings): the drawing
+   * operations, interleaved with the list's items (realtime-tex docs/DISPLAY_LIST.md, "Native
+   * drawing"). Absent when the page needs the PDF, or from an rtex without native drawing. */
+  native?: NativePage;
+}
+
+/** Where an item sits: a row (`line`) or the page's `other` items (`line: null`). */
+export interface ItemRef {
+  line: number | null;
+  item: number;
+}
+
+/** [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f. */
+export type Matrix = [number, number, number, number, number, number];
+
+/** Path segment in user space (PDF units, y up); the op's `ctm` maps it to sp, y down. */
+export type Seg =
+  | { s: 'M'; x: number; y: number }
+  | { s: 'L'; x: number; y: number }
+  | { s: 'C'; x1: number; y1: number; x2: number; y2: number; x: number; y: number }
+  | { s: 'Z' };
+
+/** 1 gray, 3 RGB or 4 CMYK components (0..1), as the PDF gives them. */
+export interface GfxColor {
+  comps: number[];
+  alpha: number;
+}
+
+export interface GfxStroke {
+  color: GfxColor;
+  width: number;
+  /** 0 butt, 1 round, 2 square */
+  cap: number;
+  /** 0 miter, 1 round, 2 bevel */
+  join: number;
+  miter_limit: number;
+  dash: number[];
+  dash_phase: number;
+}
+
+export type GfxOp =
+  | { op: 'Save'; at: ItemRef }
+  | { op: 'Restore'; at: ItemRef }
+  | { op: 'Clip'; at: ItemRef; ctm: Matrix; path: Seg[]; even_odd: boolean }
+  | { op: 'Paint'; at: ItemRef; ctm: Matrix; path: Seg[]; fill: GfxColor | null; even_odd: boolean; stroke: GfxStroke | null }
+  | {
+      op: 'Shade';
+      at: ItemRef;
+      ctm: Matrix;
+      /** [x0, y0, x1, y1] in form space */
+      bbox: [number, number, number, number];
+      radial: boolean;
+      /** axial [x0 y0 x1 y1], radial [x0 y0 r0 x1 y1 r1] */
+      coords: number[];
+      extend: [boolean, boolean];
+      /** [offset 0..1, color] */
+      stops: [number, GfxColor][];
+      alpha: number;
+    };
+
+export interface NativePage {
+  ops: GfxOp[];
+  /** Items a transformed pgf scope moves (rotated/scaled node text): draw with this map (sp to
+   * sp) instead of their MATRIX records. */
+  transforms: [ItemRef, Matrix][];
 }
 
 export type Convergence =
