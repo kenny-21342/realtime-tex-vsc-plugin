@@ -1,6 +1,6 @@
 // Drawing rtex display lists (docs/DISPLAY_LIST.md, "Rendering rules") on a 2D canvas.
 import * as opentype from 'opentype.js';
-import { fontKey, FontResource, ImageResource } from '../src/fontKey';
+import { fontKey, FontResource, ImageResource, isNullFont } from '../src/fontKey';
 import type { DisplayList, FontDesc, GfxOp, ImageInfo, Item, Line, Seg } from '../src/protocol';
 import { axialBand, cmykToRgb, cssColor, RowNative } from './native';
 
@@ -183,9 +183,11 @@ export function inexactReason(dl: DisplayList, fonts: FontStore, images: ImageSt
     for (const it of items) {
       if (it[0] === 'g') {
         const desc = dl.fonts[String(it[1])];
+        if (desc && isNullFont(desc)) continue;
         const f = desc && fonts.get(desc);
         if (!f) return 'fonts are loading';
         if (f.kind === 'missing') return f.reason;
+        if (f.kind === 'sfnt' && it[3] === null) continue; // a character the font lacks: not in the PDF
         if (!fonts.glyph(f, it[3] as number | null, it[2] as number)) return `a glyph is missing from ${desc.psname ?? desc.name ?? 'a font'}`;
       } else if (it[0] === 'i') {
         const info = imageInfo(dl, it[1] as number);
@@ -327,9 +329,11 @@ export class Painter {
         case 'g': {
           const [, font, char, index, x, y, , ef] = it as [string, number, number, number | null, number, number, number, number];
           const desc = dl.fonts[String(font)];
-          if (!desc) break;
+          if (!desc || isNullFont(desc)) break;
           const size = desc.size ?? 655360;
           const f = this.fonts.get(desc);
+          // a character an OpenType font lacks (no glyph index): LuaTeX writes nothing for it
+          if (f?.kind === 'sfnt' && index === null) break;
           const path = f ? this.fonts.glyph(f, index, char) : null;
           ctx.fillStyle = this.color;
           if (!f || f.kind === 'missing' || !path) {

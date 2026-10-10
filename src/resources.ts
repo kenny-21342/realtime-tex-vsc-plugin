@@ -3,7 +3,7 @@
 import { execFile } from 'child_process';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import { fontKey, FontResource, ImageResource } from './fontKey';
+import { fontKey, FontResource, ImageResource, isNullFont } from './fontKey';
 import type { DisplayList, FontDesc } from './protocol';
 import { MapEntry, parseEncFile, parseMapFile, type1Outlines } from './type1';
 
@@ -22,6 +22,7 @@ export class ResourceLoader {
     const want = new Map<string, FontDesc>();
     for (const dl of dls) {
       for (const desc of Object.values(dl.fonts ?? {})) {
+        if (isNullFont(desc)) continue;
         const k = fontKey(desc);
         if (!have.has(k) && !want.has(k)) want.set(k, desc);
       }
