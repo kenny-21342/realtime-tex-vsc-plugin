@@ -1,7 +1,7 @@
 // Native drawing of TikZ/pgf pages (realtime-tex docs/DISPLAY_LIST.md, "Native drawing"): which
 // pages can be drawn without the PDF, and where each drawing operation goes among the items.
 // Pure module (no DOM), unit-tested with node:test.
-import type { DisplayList, GfxColor, GfxOp, Matrix, NativePage } from '../src/protocol';
+import type { DisplayList, GfxColor, GfxOp, Matrix, NativePage, PatternCell } from '../src/protocol';
 
 /** Flags native drawing resolves (rtex_dl::gfx::RESOLVED_FLAGS). */
 const RESOLVED = new Set(['literal', 'shading']);
@@ -18,13 +18,15 @@ export interface RowNative {
   /** ops to run right after item k */
   after: Map<number, GfxOp[]>;
   transforms: Map<number, Matrix>;
+  /** the page's tiling pattern cells, by name */
+  patterns: Record<string, PatternCell>;
 }
 
 export function indexNative(n: NativePage): Map<number | null, RowNative> {
   const rows = new Map<number | null, RowNative>();
   const row = (line: number | null) => {
     let r = rows.get(line);
-    if (!r) rows.set(line, (r = { after: new Map(), transforms: new Map() }));
+    if (!r) rows.set(line, (r = { after: new Map(), transforms: new Map(), patterns: n.patterns ?? {} }));
     return r;
   };
   for (const op of n.ops) {
@@ -94,4 +96,30 @@ export function axialBand(coords: number[], bbox: [number, number, number, numbe
     [x1 - nx, y1 - ny],
     [x0 - nx, y0 - ny],
   ];
+}
+
+/** The inverse of an affine map, or undefined when it is singular. */
+export function invert(m: Matrix): Matrix | undefined {
+  const det = m[0] * m[3] - m[1] * m[2];
+  if (!det || !Number.isFinite(det)) return undefined;
+  const a = m[3] / det, b = -m[1] / det, c = -m[2] / det, d = m[0] / det;
+  return [a, b, c, d, -(a * m[4] + c * m[5]), -(b * m[4] + d * m[5])];
+}
+
+/** The cell offsets (multiples of xstep, ystep) whose bbox overlaps one period [0, xstep] x
+ * [0, ystep]: drawing the cell at each of these, clipped to its bbox, gives one period of the
+ * tiling (content past a step wraps). */
+export function wrapOffsets(cell: Pick<PatternCell, 'bbox' | 'xstep' | 'ystep'>): [number, number][] {
+  const [x0, y0, x1, y1] = cell.bbox;
+  const range = (lo: number, hi: number, step: number) => {
+    const s = Math.abs(step);
+    const out: number[] = [];
+    // k·s + [lo, hi] overlaps [0, s]
+    for (let k = Math.floor(-hi / s); k <= Math.ceil((s - lo) / s); k++) {
+      if (k * s + hi > 0 && k * s + lo < s) out.push(k * s);
+    }
+    return out;
+  };
+  const xs = range(x0, x1, cell.xstep), ys = range(y0, y1, cell.ystep);
+  return xs.flatMap((x) => ys.map((y) => [x, y] as [number, number]));
 }

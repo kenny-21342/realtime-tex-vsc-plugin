@@ -150,7 +150,18 @@ export type GfxOp =
   | { op: 'Save'; at: ItemRef }
   | { op: 'Restore'; at: ItemRef }
   | { op: 'Clip'; at: ItemRef; ctm: Matrix; path: Seg[]; even_odd: boolean }
-  | { op: 'Paint'; at: ItemRef; ctm: Matrix; path: Seg[]; fill: GfxColor | null; even_odd: boolean; stroke: GfxStroke | null }
+  | {
+      op: 'Paint';
+      at: ItemRef;
+      ctm: Matrix;
+      path: Seg[];
+      /** with `pattern`: the pattern's tint (uncoloured patterns) and opacity */
+      fill: GfxColor | null;
+      even_odd: boolean;
+      stroke: GfxStroke | null;
+      /** the fill is this tiling pattern (`NativePage.patterns`) */
+      pattern?: string;
+    }
   | {
       op: 'Shade';
       at: ItemRef;
@@ -171,6 +182,20 @@ export interface NativePage {
   /** Items a transformed pgf scope moves (rotated/scaled node text): draw with this map (sp to
    * sp) instead of their MATRIX records. */
   transforms: [ItemRef, Matrix][];
+  /** Tiling patterns (pgf's patterns library) the Paint ops fill with, by name. */
+  patterns?: Record<string, PatternCell>;
+}
+
+/** A tiling pattern's cell: `ops` (their ctm maps to pattern space) drawn clipped to `bbox` at
+ * every (i·xstep, j·ystep), `matrix` mapping pattern space to sp, y down. An uncoloured cell is
+ * painted in the tint of the fill that uses it. */
+export interface PatternCell {
+  colored: boolean;
+  bbox: [number, number, number, number];
+  xstep: number;
+  ystep: number;
+  matrix: Matrix;
+  ops: GfxOp[];
 }
 
 export type Convergence =

@@ -1,8 +1,8 @@
 // Drawing rtex display lists (docs/DISPLAY_LIST.md, "Rendering rules") on a 2D canvas.
 import * as opentype from 'opentype.js';
 import { fontKey, FontResource, ImageResource, isNullFont } from '../src/fontKey';
-import type { DisplayList, FontDesc, GfxOp, ImageInfo, Item, Line, Seg } from '../src/protocol';
-import { axialBand, cmykToRgb, cssColor, RowNative } from './native';
+import type { DisplayList, FontDesc, GfxColor, GfxOp, ImageInfo, Item, Line, Matrix, PatternCell, Seg } from '../src/protocol';
+import { axialBand, cmykToRgb, cssColor, invert, RowNative, wrapOffsets } from './native';
 
 /** Affine map [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f. */
 export type Mat = [number, number, number, number, number, number];
@@ -218,6 +218,11 @@ export class Painter {
   private color = 'rgb(0,0,0)';
   private mstack: Mat[] = [];
   private cur: Mat = IDENTITY;
+  /** the page's pattern cells (from the native drawing being drawn) */
+  private patterns: Record<string, PatternCell> = {};
+  /** an uncoloured pattern cell's tint: every color the cell's ops give is replaced by it */
+  private tint?: number[];
+  private tiles = new Map<string, HTMLCanvasElement>();
 
   constructor(
     private readonly ctx: CanvasRenderingContext2D,
@@ -232,6 +237,7 @@ export class Painter {
   draw(dl: DisplayList, items: readonly Item[], dx = 0, dy = 0, native?: RowNative): void {
     const ctx = this.ctx;
     const saved = this.cur;
+    if (native) this.patterns = native.patterns;
     native?.after.get(-1)?.forEach((op) => this.gfx(op));
     for (let k = 0; k < items.length; k++) {
       const it = items[k];
@@ -267,8 +273,19 @@ export class Painter {
     if (op.op === 'Paint') {
       const path = pathOf(op.path);
       if (op.fill) {
-        ctx.fillStyle = cssColor(op.fill);
-        ctx.fill(path, op.even_odd ? 'evenodd' : 'nonzero');
+        const cell = op.pattern !== undefined ? this.patterns[op.pattern] : undefined;
+        const style = cell && this.patternStyle(op.pattern!, cell, op.fill, m);
+        if (style) {
+          // the fill's opacity applies to the tiles
+          ctx.save();
+          ctx.globalAlpha = Math.max(0, Math.min(1, op.fill.alpha));
+          ctx.fillStyle = style;
+          ctx.fill(path, op.even_odd ? 'evenodd' : 'nonzero');
+          ctx.restore();
+        } else {
+          ctx.fillStyle = cssColor(this.tinted(op.fill));
+          ctx.fill(path, op.even_odd ? 'evenodd' : 'nonzero');
+        }
       }
       const st = op.stroke;
       if (st) {
@@ -280,7 +297,7 @@ export class Painter {
         ctx.miterLimit = st.miter_limit;
         ctx.setLineDash(st.dash.some((v) => v > 0) ? st.dash : []);
         ctx.lineDashOffset = st.dash_phase;
-        ctx.strokeStyle = cssColor(st.color);
+        ctx.strokeStyle = cssColor(this.tinted(st.color));
         ctx.stroke(path);
         ctx.setLineDash([]);
       }
@@ -320,6 +337,56 @@ export class Painter {
     ctx.fillStyle = g;
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
     ctx.restore();
+  }
+
+  private tinted(c: GfxColor): GfxColor {
+    return this.tint ? { comps: this.tint, alpha: c.alpha } : c;
+  }
+
+  /** A tiling pattern as a canvas pattern for a fill under transform `m` (user space to canvas
+   * pixels): one period of the tiling is drawn into a bitmap at the page's resolution (cells
+   * wrap where their content passes a step) and repeated through the pattern's matrix. */
+  private patternStyle(name: string, cell: PatternCell, fill: GfxColor, m: Mat): CanvasPattern | undefined {
+    const pm = mul(this.base, cell.matrix as Mat);
+    const xs = Math.abs(cell.xstep), ys = Math.abs(cell.ystep);
+    const scale = Math.sqrt(Math.abs(pm[0] * pm[3] - pm[1] * pm[2]));
+    const minv = invert(m as Matrix);
+    if (!xs || !ys || !scale || !minv) return undefined;
+    const w = Math.max(1, Math.min(2048, Math.ceil(xs * scale)));
+    const h = Math.max(1, Math.min(2048, Math.ceil(ys * scale)));
+    // pattern space to bitmap pixels
+    const bmp: Mat = [w / xs, 0, 0, h / ys, 0, 0];
+    const tint = cell.colored ? undefined : fill.comps;
+    const key = `${name} ${w} ${h} ${tint?.join(',') ?? ''}`;
+    let tile = this.tiles.get(key);
+    if (!tile) {
+      tile = document.createElement('canvas');
+      tile.width = w;
+      tile.height = h;
+      const tctx = tile.getContext('2d');
+      if (!tctx) return undefined;
+      const [x0, y0, x1, y1] = cell.bbox;
+      for (const [ox, oy] of wrapOffsets(cell)) {
+        const base = mul(bmp, [1, 0, 0, 1, ox, oy]);
+        const sub = new Painter(tctx, base, this.fonts, this.images);
+        sub.tint = tint;
+        tctx.save();
+        tctx.setTransform(base[0], base[1], base[2], base[3], base[4], base[5]);
+        const box = new Path2D();
+        box.rect(x0, y0, x1 - x0, y1 - y0);
+        tctx.clip(box);
+        for (const op of cell.ops) sub.gfx(op);
+        tctx.restore();
+      }
+      this.tiles.set(key, tile);
+    }
+    const pat = this.ctx.createPattern(tile, 'repeat');
+    const binv = invert(bmp as Matrix);
+    if (!pat || !binv) return undefined;
+    // bitmap pixels to the fill's user space (canvas patterns live in the current transform)
+    const t = mul(minv as Mat, mul(pm, binv as Mat));
+    pat.setTransform(new DOMMatrix([t[0], t[1], t[2], t[3], t[4], t[5]]));
+    return pat;
   }
 
   private drawItem(dl: DisplayList, it: Item, dx: number, dy: number): void {

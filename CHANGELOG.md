@@ -6,6 +6,9 @@
   clips, opacity, axial/radial shadings, transformed node text) are drawn on the canvas instead of
   from the PDF. Needs an rtex with native drawing (realtime-tex docs/DISPLAY_LIST.md, "Native
   drawing"); with older builds those pages still come from the PDF.
+- Tiling patterns (TikZ `patterns` / `patterns.meta`) on native pages are drawn too: each cell is
+  rendered once per period at the page's resolution and repeated through the pattern's matrix,
+  so tiles stay anchored to the page as in the PDF (realtime-tex docs/display-list.md).
 - Cached TikZ pictures on native pages are found through the page's `pictures` spots and matched by
   cache key (`file:line`), so they stay in place while you edit around them.
 - `realtimeTex.engine.repository` and `realtimeTex.engine.branch`: build the managed engine from a

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { DisplayList, NativePage } from '../src/protocol';
-import { axialBand, cssColor, indexNative, nativeOf } from '../webview/native';
+import type { DisplayList, Matrix, NativePage } from '../src/protocol';
+import { axialBand, cssColor, indexNative, invert, nativeOf, wrapOffsets } from '../webview/native';
 
 const dl = (flags: unknown): DisplayList => ({ kind: 'page', fonts: {}, lines: [], other: [], flags, width: 0, height: 0, depth: 0 });
 const native: NativePage = {
@@ -45,4 +45,24 @@ test('colors and the band of an unextended axial shading', () => {
   assert.deepEqual([xs[0], xs[3]].map(Math.round), [0, 10]);
   assert.ok(Math.max(...band.map(([, y]) => Math.abs(y))) > 5);
   assert.equal(axialBand([1, 1, 1, 1], [0, 0, 1, 1]), undefined);
+});
+
+test('invert undoes an affine map', () => {
+  const m: Matrix = [2, 1, -1, 3, 5, -7];
+  const inv = invert(m)!;
+  const [x, y] = [0.3, -4];
+  const fx = m[0] * x + m[2] * y + m[4], fy = m[1] * x + m[3] * y + m[5];
+  assert.ok(Math.abs(inv[0] * fx + inv[2] * fy + inv[4] - x) < 1e-9);
+  assert.ok(Math.abs(inv[1] * fx + inv[3] * fy + inv[5] - y) < 1e-9);
+  assert.equal(invert([1, 2, 2, 4, 0, 0]), undefined);
+});
+
+test('a pattern cell wraps where its bbox passes a step', () => {
+  // pgf's north east lines: bbox [-1, 4] around a step of 3
+  const offs = wrapOffsets({ bbox: [-1, -1, 4, 4], xstep: 3, ystep: 3 });
+  const xs = [...new Set(offs.map((o) => o[0]))].sort((a, b) => a - b);
+  assert.deepEqual(xs, [-3, 0, 3]);
+  assert.equal(offs.length, 9);
+  // a cell inside its period needs only itself
+  assert.deepEqual(wrapOffsets({ bbox: [0, 0, 2, 2], xstep: 3, ystep: 3 }), [[0, 0]]);
 });
