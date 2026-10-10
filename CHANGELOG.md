@@ -22,6 +22,10 @@
 - A live unit takes its cached pictures only from its own page lines, on natively drawn pages too
   (the `pictures` spots inside those lines), so another unit's picture of the same size is never
   copied.
+- `realtimeTex.engine.fastBudgetFactor` and `realtimeTex.engine.passTimeoutSeconds`: the live
+  budget relative to the document's typical update (rtex `--fast-budget-factor`), and the time
+  limit for a full compile (rtex `--pass-timeout-ms`). Passed only when changed, like the other
+  engine settings.
 - Glyphs LuaTeX does not write to the PDF (a font with no name or file, such as pgf's `\nullfont`;
   a character an OpenType font lacks) are skipped instead of sending the page to the PDF.
 

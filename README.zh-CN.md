@@ -84,6 +84,8 @@ fontspec 默认的 node 模式也能用，但每次按键会更慢一些。
 | `realtimeTex.updateCheck` | `notify` | 每天检查一次 realtime-tex `main` 分支是否有更新的引擎：`notify` 提示更新，`auto` 自动更新并重新构建，`off` 从不检查。该设置带有 **Update rtex now** 链接。 |
 | `realtimeTex.engine.eligibility` | `probe` | rtex 如何挑选可实时更新的部分：`probe`（将实时结果与上一次完整编译比对）或 `allowlist`（只接受已知安全的命令）。 |
 | `realtimeTex.engine.fastBudgetMs` | `5` | 实时重排一个部分的时间预算；连续三次超时的部分会改为等待完整编译。 |
+| `realtimeTex.engine.fastBudgetFactor` | `4` | 预算随文档调整：只有当一个部分的耗时同时超过文档典型实时更新耗时的这么多倍时才算超时（`0`：只用固定预算）。 |
+| `realtimeTex.engine.passTimeoutSeconds` | `120` | 完整编译超过这个时间仍未结束时会被停止（例如陷入死循环的文档）。 |
 | `realtimeTex.engine.pictureCache` | `true` | 复用上一次完整编译中未改动的 TikZ 图形。 |
 | `realtimeTex.debug.enabled` | `false` | 每当实时引擎卡住或崩溃时，rtex 会保存一个调试包（源码、上下文、跟踪、TeX 日志），并把每次实时编译记录到 `requests.log`。用 **Open Debug Folder** 查看。 |
 | `realtimeTex.debug.directory` | *（插件存储）* | 调试包的保存位置。 |

@@ -92,6 +92,8 @@ PDF, as before.
 | `realtimeTex.engine.branch` | `main` | Branch of that repository. Changing either and running **Update rtex Engine** switches the managed checkout. |
 | `realtimeTex.engine.eligibility` | `probe` | How rtex picks the parts that update live: `probe` (compare a live result with the last full compile) or `allowlist` (only known-safe commands). |
 | `realtimeTex.engine.fastBudgetMs` | `5` | Time budget for re-typesetting one part live; a part that takes longer three times in a row waits for the full compile. |
+| `realtimeTex.engine.fastBudgetFactor` | `4` | The budget follows the document: a part is only too slow when it also takes longer than this many times the document's typical live update (`0`: the fixed budget alone). |
+| `realtimeTex.engine.passTimeoutSeconds` | `120` | A full compile still running after this long is stopped (a document that loops forever). |
 | `realtimeTex.engine.pictureCache` | `true` | Reuse unchanged TikZ pictures from the previous full compile. |
 | `realtimeTex.debug.enabled` | `false` | rtex saves a debug bundle (source, context, trace, TeX log) whenever the live engine hangs or crashes, and lists every live compile in `requests.log`. **Open Debug Folder** shows them. |
 | `realtimeTex.debug.directory` | *(storage)* | Where debug bundles go. |
