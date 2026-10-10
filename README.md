@@ -1,5 +1,7 @@
 # Realtime TeX Live Preview
 
+English | [简体中文](README.zh-CN.md)
+
 A live LaTeX preview for VS Code that keeps up with your typing. It is built on
 [realtime-tex (rtex)](https://github.com/HenryXiaoYang/realtime-tex), which keeps LuaTeX running and
 re-typesets only the paragraph you are editing, in about a millisecond. Page breaks,
@@ -28,6 +30,7 @@ The extension keeps the rtex it installed up to date. It checks once a day and o
 |---|---|
 | **Toolbar** | Status pill · zoom − / + · **Fit width** · **Follow cursor** · **Recompile** · **Export PDF** |
 | **Status pill** | **Live · 0.8 ms** means the paragraph was re-typeset that fast. **Updating layout…** means a full compile is placing pages, references and floats. **Up to date** means everything matches. **N errors** opens the Problems panel. |
+| **Live markers** | A bar next to the line numbers shows how each part of your source updates: **solid green** updates live as you type, **dotted amber** waits for the full compile (the preamble, TikZ, …). Hover over a part that went to the full compile to see why. |
 | **Follow cursor** | The preview scrolls to the paragraph you are editing. **Ctrl+Alt+J** jumps there on demand. |
 | **Jump to source** | Double-click (or Ctrl/Cmd+click) a paragraph in the preview. |
 | **Zoom** | Ctrl + mouse wheel, Ctrl + = / − / 0 |
@@ -96,6 +99,7 @@ PDF, as before.
 | `realtimeTex.buildDir` | *(storage)* | Where rtex keeps build files. Empty keeps them out of your project. |
 | `realtimeTex.exportPath` | `${mainDir}/${mainName}.pdf` | Where **Export PDF** writes. |
 | `realtimeTex.syncCursor` | `true` | Preview follows the cursor. |
+| `realtimeTex.editor.liveMarkers` | `true` | Live/full-compile bars next to the line numbers. |
 | `realtimeTex.autoStart` | `false` | Start the engine when a LaTeX file opens, without waiting for the preview. |
 | `realtimeTex.stopWhenPreviewCloses` | `true` | Stop the engine when the preview closes. |
 | `realtimeTex.preview.zoom` | `fitWidth` | Initial zoom. |
@@ -169,6 +173,7 @@ drawing.
 | `src/rtexProcess.ts` | The `rtex serve` JSON-lines child process |
 | `src/edits.ts` | VS Code changes (UTF-16) → rtex byte edits (UTF-8) |
 | `src/resources.ts`, `src/type1.ts` | Font and image loading; Type1 fonts and `pdftex.map` → glyph outlines |
+| `src/gutter.ts`, `src/liveMarks.ts` | The live/full-compile markers next to the line numbers |
 | `src/preview/panel.ts` | The webview panel and its message protocol |
 | `src/setup.ts`, `src/config.ts` | Setup check, rtex/TeX Live installation, settings |
 | `webview/` | The preview: page/overlay model, canvas renderer, pdf.js fallback, toolbar |
