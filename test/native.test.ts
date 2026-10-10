@@ -35,7 +35,10 @@ test('operations are indexed by row and by the item they follow, in order', () =
 test('colors and the band of an unextended axial shading', () => {
   assert.equal(cssColor({ comps: [1, 0, 0], alpha: 0.5 }), 'rgba(255,0,0,0.5)');
   assert.equal(cssColor({ comps: [0.5], alpha: 1 }), 'rgba(128,128,128,1)');
-  assert.equal(cssColor({ comps: [0, 0, 0.4, 0], alpha: 1 }), 'rgba(255,255,153,1)');
+  // CMYK as pdf.js shows it (and so as the PDF fallback looks)
+  assert.equal(cssColor({ comps: [0, 1, 0, 0], alpha: 1 }), 'rgba(251,49,153,1)');
+  assert.equal(cssColor({ comps: [0, 0, 0, 0], alpha: 1 }), 'rgba(255,255,255,1)');
+  assert.equal(cssColor({ comps: [0, 0, 0, 1], alpha: 1 }), 'rgba(44,46,53,1)');
   // horizontal axis from x=0 to x=10: the band is everything between the vertical lines there
   const band = axialBand([0, 0, 10, 0], [0, 0, 10, 5])!;
   const xs = band.map(([x]) => x).sort((a, b) => a - b);

@@ -2,7 +2,7 @@
 import * as opentype from 'opentype.js';
 import { fontKey, FontResource, ImageResource } from '../src/fontKey';
 import type { DisplayList, FontDesc, GfxOp, ImageInfo, Item, Line, Seg } from '../src/protocol';
-import { axialBand, cssColor, RowNative } from './native';
+import { axialBand, cmykToRgb, cssColor, RowNative } from './native';
 
 /** Affine map [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f. */
 export type Mat = [number, number, number, number, number, number];
@@ -36,7 +36,7 @@ export function pdfColor(data: string): string | undefined {
       css = rgb(r, g, b);
     } else if ((op === 'k' || op === 'K') && i >= 4) {
       const [c, m, y, k] = n(4);
-      css = rgb((1 - c) * (1 - k), (1 - m) * (1 - k), (1 - y) * (1 - k));
+      css = rgb(...cmykToRgb(c, m, y, k));
     } else continue;
     if (op === op.toLowerCase()) fill ??= css;
     else stroke ??= css;
