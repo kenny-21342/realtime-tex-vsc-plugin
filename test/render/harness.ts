@@ -3,7 +3,8 @@
 import type { FontResource } from '../../src/fontKey';
 import type { DisplayList, NativePage } from '../../src/protocol';
 import { indexNative, nativeOf } from '../../webview/native';
-import { FontStore, ImageStore, inexactReason, Mat, Painter } from '../../webview/render';
+import { FontStore, ImageStore, inexactReason, Mat, mul, Painter } from '../../webview/render';
+import { displaySize, rotationOf, turn } from '../../webview/rotate';
 
 type Wire = { kind: 'sfnt'; b64: string } | Exclude<FontResource, { kind: 'sfnt' }>;
 
@@ -28,13 +29,17 @@ function bytes(b64: string): Uint8Array {
   const n = nativeOf(page);
   const reason = inexactReason(dl, fonts, images, dl.lines, n !== undefined);
   const k = dpi / 72 / 65781.76; // device px per sp (1 bp = 1/72 in)
+  // turned as a viewer shows it (and as MuPDF renders it), like the preview
+  const rot = rotationOf(dl);
+  const [pw, ph] = [dl.page_width ?? 0, dl.page_height ?? 0];
+  const [sw, sh] = displaySize(pw, ph, rot);
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round((dl.page_width ?? 0) * k);
-  canvas.height = Math.round((dl.page_height ?? 0) * k);
+  canvas.width = Math.round(sw * k);
+  canvas.height = Math.round(sh * k);
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const base: Mat = [k, 0, 0, k, 0, 0];
+  const base: Mat = mul([k, 0, 0, k, 0, 0], turn(rot, pw, ph));
   const p = new Painter(ctx, base, fonts, images);
   const rows = n ? indexNative(n) : undefined;
   p.draw(dl, dl.other ?? [], 0, 0, rows?.get(null));

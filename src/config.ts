@@ -118,6 +118,10 @@ export function engineArgs(scope?: vscode.Uri): string[] {
   if (eligibility && eligibility !== 'probe') args.push('--eligibility', eligibility);
   const budget = Math.round(c.get<number>('engine.fastBudgetMs', 5));
   if (budget > 0 && budget !== 5) args.push('--fast-budget-ms', String(budget));
+  const factor = c.get<number>('engine.fastBudgetFactor', 4);
+  if (factor >= 0 && factor !== 4) args.push('--fast-budget-factor', String(factor));
+  const passTimeout = Math.round(c.get<number>('engine.passTimeoutSeconds', 120));
+  if (passTimeout > 0 && passTimeout !== 120) args.push('--pass-timeout-ms', String(passTimeout * 1000));
   if (!c.get<boolean>('engine.pictureCache', true)) args.push('--no-picture-cache');
   return args;
 }

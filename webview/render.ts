@@ -371,8 +371,8 @@ export class Painter {
           break;
         }
         case 'c': {
-          const [, stackId, cmd, data] = it as [string, number, number | null, string];
-          this.colorOp(stackId ?? 0, cmd, data ?? '');
+          const [, stackId, cmd, data, after] = it as [string, number, number | null, string, string | undefined];
+          this.colorOp(stackId ?? 0, cmd, data ?? '', after);
           break;
         }
         case 'i': {
@@ -432,7 +432,10 @@ export class Painter {
     for (const [x0, y0, x1, y1] of rects) ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
   }
 
-  private colorOp(stack: number, cmd: number | null, data: string): void {
+  /** `after`: the stack's top after the command in LuaTeX's order (pages from rtex's capture):
+   * rows and `other` interleave on the page, so the replay in list order can pop what a later
+   * row pushed, or below the page's start; the true top wins. */
+  private colorOp(stack: number, cmd: number | null, data: string, after?: string): void {
     let st = this.stacks.get(stack);
     if (!st) this.stacks.set(stack, (st = []));
     // LuaTeX reports the colorstack command in `cmd` (0 set, 1 push, 2 pop, 3 current); when it
@@ -444,6 +447,10 @@ export class Painter {
     } else if (op === 1) st.push(data);
     else if (op === 2) st.pop();
     else return;
+    if (after) {
+      if (st.length) st[st.length - 1] = after;
+      else st.push(after);
+    }
     const top = st[st.length - 1];
     this.color = (top && pdfColor(top)) ?? 'rgb(0,0,0)';
   }

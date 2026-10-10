@@ -271,6 +271,20 @@
           "maximum": 1000,
           "markdownDescription": "Time budget, in milliseconds, for re-typesetting one part live. A part that takes longer three times in a row waits for the full compile until the next layout. Raise it on a slow computer. Changing it restarts the engine."
         },
+        "realtimeTex.engine.fastBudgetFactor": {
+          "type": "number",
+          "default": 4,
+          "minimum": 0,
+          "maximum": 100,
+          "markdownDescription": "The budget follows the document: a part is only too slow when it also takes longer than this many times the document's typical live update. With OpenType fonts (fontspec), every paragraph can cost 5–15 ms, and they stay live. `0` uses `#realtimeTex.engine.fastBudgetMs#` alone. Needs rtex with `--fast-budget-factor`. Changing it restarts the engine."
+        },
+        "realtimeTex.engine.passTimeoutSeconds": {
+          "type": "number",
+          "default": 120,
+          "minimum": 1,
+          "maximum": 3600,
+          "markdownDescription": "A full compile still running after this many seconds is stopped, for example a document that loops forever. Raise it for very long documents. Needs rtex with `--pass-timeout-ms`. Changing it restarts the engine."
+        },
         "realtimeTex.engine.pictureCache": {
           "type": "boolean",
           "default": true,
@@ -303,6 +317,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Scroll the preview to follow the text cursor."
+        },
+        "realtimeTex.editor.liveMarkers": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Mark each part of the source next to the line numbers while the preview runs: a **solid green bar** means the part updates live as you type, a **dotted amber bar** means it waits for the full compile (the preamble, TikZ, …). Hover over a marked part that went to the full compile to see why."
         },
         "realtimeTex.preview.invertInDarkTheme": {
           "type": "boolean",

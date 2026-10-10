@@ -26,7 +26,7 @@ export interface FontDesc {
   subfont?: number | null;
 }
 
-/** Items: ["g",font,char,index,x,y,w,ef] ["r",x,y_top,w,h] ["c",stack,cmd,data] ["l",mode,data]
+/** Items: ["g",font,char,index,x,y,w,ef] ["r",x,y_top,w,h] ["c",stack,cmd,data,after?] ["l",mode,data]
  * ["u",kind,detail] ["m","on"|"off",x] ["i",index,x,y_top,w,h] ["M","save"|"set"|"restore",x,y,data] */
 export type Item = [string, ...unknown[]];
 
@@ -68,6 +68,9 @@ export interface DisplayList {
   page?: number | null;
   page_width?: Sp;
   page_height?: Sp;
+  /** The page's /Rotate, degrees clockwise (pdflscape's landscape pages). Coordinates are those
+   * of the unrotated page; the preview turns the whole page as PDF viewers do. */
+  rotate?: number;
   /** Pictures the page draws from the picture cache's stored drawing (native drawing): where
    * each is, by cache key (`file:line`). */
   pictures?: PictureSpot[];
