@@ -1,9 +1,13 @@
 // Integration suite, run inside the VS Code extension host by runTest.ts.
 import { execFile } from 'child_process';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { Api } from '../../src/extension';
+import { activeManaged, installedRelease, releaseBinary } from '../../src/config';
+import { installRelease } from '../../src/prebuilt';
+import { runTask, sq } from '../../src/setup';
 
 const shots = process.env.RTEX_E2E_OUT ?? '';
 
@@ -67,6 +71,9 @@ async function steps(): Promise<void> {
   step('main file found through \\input');
   await waitFor('the first layout', () => s.status.phase === 'live' && s.model.hasLayout, 120000);
   step(`first layout: ${s.model.pagesTotal} page(s)`);
+  // type once the layout has settled, as a person would (an edit made while the layout is
+  // still catching up goes to the full compile)
+  await waitFor('the layout to settle', () => s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
   await sleep(1500);
   await vscode.commands.executeCommand('notifications.clearAll');
   await screenshot('1-preview.png');
@@ -129,7 +136,7 @@ async function steps(): Promise<void> {
   step(`exported ${path.basename(pdf)}`);
 
   // 7. a full compile that fails after the first layout keeps the pages. RTEX_E2E_SKIP_FAILED_PASS=1
-  // skips it: rtex at e5cab6a reports the body-only pass after a breaking preamble edit as Ok
+  // skips it: rtex (e5cab6a through b858819) reports the body-only pass after a breaking preamble edit as Ok
   // with the previous pages
   if (!process.env.RTEX_E2E_SKIP_FAILED_PASS) {
     const pagesBefore = s.model.pagesTotal;
@@ -167,5 +174,42 @@ async function steps(): Promise<void> {
   step(`failed first compile explained: ${sb.screen.message}`);
   await sleep(800);
   await screenshot('5-first-compile-failed.png');
+
+  // 10. the terminal tasks of Install rtex / Install TeX Live reach bash intact (Git Bash on
+  // Windows): quotes, command substitution and a path with a space
+  const out = path.join(mkdtempSync(path.join(os.tmpdir(), 'rtex task ')), "it's here.txt");
+  if (!(await runTask('Realtime TeX task check', path.dirname(out), `set -e; v="it's ok"; echo "$v $(echo nested)" > ${sq(out)}`))) throw new Error('the task failed');
+  const got = existsSync(out) ? readFileSync(out, 'utf8').trim() : '(no file)';
+  if (got !== "it's ok nested") throw new Error(`the task wrote ${got}`);
+  step(`setup task ran in ${process.platform === 'win32' ? 'Git Bash' : 'bash'}`);
+
+  // 11. Install rtex: download the latest release for this machine (what the command does,
+  // into a scratch storage folder), then run the live preview on the downloaded engine
+  const state = new Map<string, unknown>();
+  const fakeCtx = {
+    globalStorageUri: vscode.Uri.file(mkdtempSync(path.join(os.tmpdir(), 'rtex storage '))),
+    globalState: { get: (k: string) => state.get(k), update: async (k: string, v: unknown) => void state.set(k, v) },
+  } as unknown as vscode.ExtensionContext;
+  const progress: string[] = [];
+  const res = await installRelease(fakeCtx, { report: (p) => void (p.message && progress.push(p.message)) });
+  if (!res.ok) throw new Error(`installing the release failed: ${res.error}`);
+  if (installedRelease(fakeCtx) !== res.tag || activeManaged(fakeCtx) !== 'release') throw new Error('the release is not the active rtex');
+  step(`downloaded and verified ${res.version} (${res.tag})`);
+  const cfg = vscode.workspace.getConfiguration('realtimeTex');
+  const builtServer = cfg.get<string>('serverPath');
+  await cfg.update('serverPath', releaseBinary(fakeCtx, res.tag), vscode.ConfigurationTarget.Global);
+  try {
+    await vscode.window.showTextDocument(main, vscode.ViewColumn.One);
+    await vscode.commands.executeCommand('realtimeTex.openPreview');
+    await waitFor('a session on the downloaded rtex', () => api.session()?.mainFile === main.fileName && api.session()!.running, 20000);
+    const sr = api.session()!;
+    await waitFor('its first layout', () => sr.status.phase === 'live' && sr.model.hasLayout, 120000);
+    await waitFor('the layout to settle', () => sr.status.convergence?.state === 'Converged' && !sr.status.pending, 120000);
+    await insertAfter(main, 'A second paragraph refers', ' quickly');
+    await waitFor('a fast update from the downloaded rtex', () => sr.status.lastFastMs !== undefined, 30000);
+    step(`downloaded rtex typesets live (${sr.status.lastFastMs!.toFixed(2)} ms)`);
+  } finally {
+    await cfg.update('serverPath', builtServer, vscode.ConfigurationTarget.Global);
+  }
   console.log(`[e2e] all ${steps.length} steps passed`);
 }

@@ -1,12 +1,13 @@
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { cfg, debugDir, isTexDocument, processEnv, resolveServer } from './config';
+import { cfg, debugDir, isTexDocument, platformSupported, processEnv, resolveServer } from './config';
 import { PreviewPanel, VIEW_TYPE } from './preview/panel';
 import { ResourceLoader } from './resources';
 import { findMainFile, isMainFile } from './root';
 import { Session } from './session';
-import { buildFromSource, checkForRtexUpdate, checkSetup, selectServerPath, updateRtex } from './setup';
+import { pruneReleases } from './prebuilt';
+import { buildFromSource, checkForRtexUpdate, checkSetup, installRtex, selectServerPath, updateRtex } from './setup';
 import { StatusBar } from './statusBar';
 
 const WALKTHROUGH = 'henryxiaoyang.realtime-tex#realtimeTex.welcome';
@@ -48,9 +49,10 @@ export function activate(context: vscode.ExtensionContext): Api {
   reg('realtimeTex.openLatexLog', () => withSession((s) => s.openLatexLog(), true));
   reg('realtimeTex.openDebugFolder', () => openDebugFolder());
   reg('realtimeTex.checkSetup', () => checkSetup(ctx));
-  reg('realtimeTex.buildFromSource', () => buildFromSource(ctx, () => void (session && session.status.phase === 'failed' ? session.restart() : undefined)));
-  // a rebuilt engine takes effect when the running (or failed) session restarts; a stopped one stays stopped
+  // a new engine takes effect when the running (or failed) session restarts; a stopped one stays stopped
   const restartAfterBuild = () => void (session && (session.running || session.status.phase === 'failed') ? session.restart().then(updateUi) : undefined);
+  reg('realtimeTex.installRtex', () => installRtex(ctx, restartAfterBuild));
+  reg('realtimeTex.buildFromSource', () => buildFromSource(ctx, restartAfterBuild));
   reg('realtimeTex.updateRtex', () => updateRtex(ctx, restartAfterBuild));
   reg('realtimeTex.selectServerPath', async () => {
     if ((await selectServerPath()) && session) await session.restart();
@@ -98,7 +100,10 @@ export function activate(context: vscode.ExtensionContext): Api {
   updateUi();
   void welcome();
   // look for a newer engine once things have settled
-  const updateTimer = setTimeout(() => void checkForRtexUpdate(ctx, restartAfterBuild), 15000);
+  const updateTimer = setTimeout(() => {
+    void pruneReleases(ctx); // releases an engine still ran on when they were replaced
+    void checkForRtexUpdate(ctx, restartAfterBuild);
+  }, 15000);
   context.subscriptions.push({ dispose: () => clearTimeout(updateTimer) });
   return { session: () => session, panel: () => panel };
 }
@@ -203,13 +208,8 @@ async function openPreview(uri: vscode.Uri | undefined, beside: boolean): Promis
   if (!panel) panel = PreviewPanel.create(ctx, panelHost, column, true);
   else panel.reveal(true);
 
-  if (process.platform !== 'linux' && process.platform !== 'darwin') {
-    panel.showScreen({
-      screen: 'unsupported',
-      message:
-        'The rtex engine runs on Linux and macOS. On Windows, open this folder in WSL ("WSL: Reopen Folder in WSL") and install the extension there.',
-      actions: [{ label: 'Learn about WSL', command: 'vscode.open', args: ['https://code.visualstudio.com/docs/remote/wsl'], primary: true }],
-    });
+  if (!platformSupported()) {
+    panel.showScreen({ screen: 'unsupported', message: `The rtex engine runs on Linux, macOS and Windows, not on ${process.platform}.` });
     return;
   }
   const doc = targetDocument(uri);
@@ -246,7 +246,7 @@ async function startFor(main: string): Promise<void> {
 
 async function maybeAutoStart(doc: vscode.TextDocument): Promise<void> {
   if (!cfg(doc.uri).get<boolean>('autoStart', false) || session?.running) return;
-  if (process.platform !== 'linux' && process.platform !== 'darwin') return;
+  if (!platformSupported()) return;
   const main = await mainFileFor(doc.uri);
   if (main && resolveServer(ctx)) await startFor(main);
 }
