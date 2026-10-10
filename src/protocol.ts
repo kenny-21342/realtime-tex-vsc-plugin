@@ -26,7 +26,7 @@ export interface FontDesc {
   subfont?: number | null;
 }
 
-/** Items: ["g",font,char,index,x,y,w,ef] ["r",x,y_top,w,h] ["c",stack,cmd,data] ["l",mode,data]
+/** Items: ["g",font,char,index,x,y,w,ef] ["r",x,y_top,w,h] ["c",stack,cmd,data,after?] ["l",mode,data]
  * ["u",kind,detail] ["m","on"|"off",x] ["i",index,x,y_top,w,h] ["M","save"|"set"|"restore",x,y,data] */
 export type Item = [string, ...unknown[]];
 
