@@ -4,7 +4,8 @@ import { SP_PER_BP } from '../src/protocol';
 import { cachedPictureMoves, PreviewModel, Rect } from './model';
 import { initPdfWorker, openPdf, PdfDoc, rasterizePdfImage, renderPdfPage } from './pdf';
 import { indexNative, nativeOf } from './native';
-import { FontStore, ImageStore, inexactReason, Mat, Painter } from './render';
+import { FontStore, ImageStore, inexactReason, Mat, mul, Painter } from './render';
+import { displaySize, rotationOf, turn, unturn } from './rotate';
 
 interface VsCodeApi {
   postMessage(m: WebviewToHost): void;
@@ -123,7 +124,9 @@ const PX_PER_BP = 96 / 72;
 
 function maxPageWidth(): number {
   let w = 0;
-  for (const p of model.pages.values()) w = Math.max(w, p.dl.page_width ?? 0);
+  for (const p of model.pages.values()) {
+    w = Math.max(w, displaySize(p.dl.page_width ?? 0, p.dl.page_height ?? 0, rotationOf(p.dl))[0]);
+  }
   return w || 597.5 * SP_PER_BP; // A4
 }
 
@@ -199,6 +202,14 @@ function pageSizeSp(n: number): [number, number] {
   return [p?.dl.page_width ?? 597.5 * SP_PER_BP, p?.dl.page_height ?? 845 * SP_PER_BP];
 }
 
+/** The page's rotation (degrees clockwise) and its size as shown (sides swapped when turned). */
+function pageView(n: number): { rot: number; w: number; h: number; shownW: number; shownH: number } {
+  const [w, h] = pageSizeSp(n);
+  const rot = rotationOf(model.pages.get(n)?.dl);
+  const [shownW, shownH] = displaySize(w, h, rot);
+  return { rot, w, h, shownW, shownH };
+}
+
 /** Create/remove page elements to match the model and size them for the current zoom. */
 function layoutPages(): void {
   const els = pageEls();
@@ -218,7 +229,7 @@ function layoutPages(): void {
   }
   const k = cssScale();
   pageEls().forEach((el, i) => {
-    const [w, h] = pageSizeSp(i + 1);
+    const { shownW: w, shownH: h } = pageView(i + 1);
     el.style.width = `${Math.round(w * k)}px`;
     el.style.height = `${Math.round(h * k)}px`;
     dirty.add(i + 1);
@@ -254,9 +265,9 @@ async function renderPage(n: number): Promise<void> {
   renderToken.set(n, token);
   const k = cssScale();
   const dpr = window.devicePixelRatio || 1;
-  const [wSp, hSp] = pageSizeSp(n);
-  const w = Math.max(1, Math.round(wSp * k * dpr));
-  const h = Math.max(1, Math.round(hSp * k * dpr));
+  const view = pageView(n);
+  const w = Math.max(1, Math.round(view.shownW * k * dpr));
+  const h = Math.max(1, Math.round(view.shownH * k * dpr));
   // draw off-screen, then swap: no flicker while a PDF page renders
   const canvas = document.createElement('canvas');
   canvas.width = w;
@@ -264,7 +275,8 @@ async function renderPage(n: number): Promise<void> {
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, w, h);
-  const base: Mat = [k * dpr, 0, 0, k * dpr, 0, 0];
+  // page coordinates (sp) to device pixels: the page turned as a viewer shows it, then scaled
+  const base: Mat = mul([k * dpr, 0, 0, k * dpr, 0, 0], turn(view.rot, view.w, view.h));
 
   const hidden = model.hiddenLines(n);
   const lines = pu.dl.lines.filter((_, i) => !hidden.has(i));
@@ -363,11 +375,20 @@ async function renderPage(n: number): Promise<void> {
 
 const PT = 65536;
 
-/** Device-pixel rectangle of an sp rectangle under the page's base matrix (scale only). */
+/** Device-pixel rectangle of an sp rectangle under the page's base matrix (a scale and a quarter
+ * turn: the corners' bounding box). */
 function deviceRect(base: Mat, r: Rect): [number, number, number, number] {
-  const x = Math.round(r.x * base[0] + base[4]);
-  const y = Math.round(r.y * base[3] + base[5]);
-  return [x, y, Math.max(0, Math.round((r.x + r.w) * base[0] + base[4]) - x), Math.max(0, Math.round((r.y + r.h) * base[3] + base[5]) - y)];
+  const pts = [
+    [r.x, r.y],
+    [r.x + r.w, r.y],
+    [r.x, r.y + r.h],
+    [r.x + r.w, r.y + r.h],
+  ].map(([px, py]) => [px * base[0] + py * base[2] + base[4], px * base[1] + py * base[3] + base[5]]);
+  const x = Math.round(Math.min(...pts.map((p) => p[0])));
+  const y = Math.round(Math.min(...pts.map((p) => p[1])));
+  const x1 = Math.round(Math.max(...pts.map((p) => p[0])));
+  const y1 = Math.round(Math.max(...pts.map((p) => p[1])));
+  return [x, y, Math.max(0, x1 - x), Math.max(0, y1 - y)];
 }
 
 /** The pixels of `r` (sp) on the canvas, or undefined when it is empty or off the canvas. */
@@ -516,6 +537,10 @@ function reveal(page: number, x: number, y: number, force: boolean): void {
   const el = pageEls()[page - 1];
   if (!el) return;
   const k = cssScale();
+  const view = pageView(page);
+  const t = turn(view.rot, view.w, view.h);
+  // the point as the turned page shows it
+  [x, y] = [t[0] * x + t[2] * y + t[4], t[1] * x + t[3] * y + t[5]];
   const top = el.offsetTop + y * k;
   const vTop = viewport.scrollTop;
   const vh = viewport.clientHeight;
@@ -527,7 +552,7 @@ function reveal(page: number, x: number, y: number, force: boolean): void {
   if (force) {
     const marker = document.createElement('div');
     marker.className = 'marker';
-    const [wSp] = pageSizeSp(page);
+    const wSp = view.shownW;
     marker.style.left = `${x * k - 6}px`;
     marker.style.width = `${Math.max(40, (wSp - 2 * x) * k + 12)}px`;
     marker.style.top = `${(y - 9 * 65536) * k}px`;
@@ -542,7 +567,10 @@ function jumpFromEvent(e: MouseEvent): void {
   if (!el) return;
   const rect = el.getBoundingClientRect();
   const k = cssScale();
-  post({ type: 'jump', page: Number(el.dataset.page), x: (e.clientX - rect.left) / k, y: (e.clientY - rect.top) / k });
+  const page = Number(el.dataset.page);
+  const view = pageView(page);
+  const [x, y] = unturn(view.rot, view.w, view.h, (e.clientX - rect.left) / k, (e.clientY - rect.top) / k);
+  post({ type: 'jump', page, x, y });
 }
 pagesEl.addEventListener('dblclick', (e) => {
   window.getSelection()?.removeAllRanges();

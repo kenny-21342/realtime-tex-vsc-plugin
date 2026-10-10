@@ -68,6 +68,9 @@ export interface DisplayList {
   page?: number | null;
   page_width?: Sp;
   page_height?: Sp;
+  /** The page's /Rotate, degrees clockwise (pdflscape's landscape pages). Coordinates are those
+   * of the unrotated page; the preview turns the whole page as PDF viewers do. */
+  rotate?: number;
   /** Pictures the page draws from the picture cache's stored drawing (native drawing): where
    * each is, by cache key (`file:line`). */
   pictures?: PictureSpot[];

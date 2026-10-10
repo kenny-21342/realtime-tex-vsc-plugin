@@ -13,6 +13,9 @@
 - Render check (`npm run build:render`, `test/render/`): the preview's drawing code against MuPDF.
 - CMYK colors (text and drawings) are converted the way pdf.js converts them, so a page looks the
   same drawn natively or from the PDF (CMYK magenta was #ff00ff before).
+- Landscape pages (pdflscape's `/Rotate`, rtex's page `rotate`) are shown turned, as PDF viewers
+  show them: drawing, the PDF fallback, double-click to source and the cursor marker follow the
+  turn.
 - Glyphs LuaTeX does not write to the PDF (a font with no name or file, such as pgf's `\nullfont`;
   a character an OpenType font lacks) are skipped instead of sending the page to the PDF.
 
