@@ -67,11 +67,15 @@ PDF round trip. It supports:
 
 - OpenType/TrueType fonts, by glyph index;
 - Type1 fonts, such as Computer Modern math and `lmodern`, found through TeX's `pdftex.map`;
-- colors, rules, PNG/JPEG/PDF images and graphicx scaling.
+- colors, rules, PNG/JPEG/PDF images and graphicx scaling;
+- TikZ/pgf drawings (paths, fills, strokes, dashes, clips, opacity, axial and radial shadings,
+  rotated or scaled node text), including pictures reused from the picture cache, when the engine
+  sends their drawing (`native` in rtex's page updates; rtex with native drawing, see below).
 
-Some pages cannot be drawn this way, for example TikZ drawings or `\special`s. Those are shown
-from the background PDF, marked with a small **from PDF** badge, and edits on them still appear
-live on top.
+Some pages still cannot be drawn this way, for example tiling patterns or other `\special`s. Those
+are shown from the background PDF, marked with a small **from PDF** badge, and edits on them still
+appear live on top. With an rtex build that has no native drawing, every TikZ page is shown from the
+PDF, as before.
 
 ## Settings
 
@@ -80,7 +84,9 @@ live on top.
 | `realtimeTex.serverPath` | *(auto)* | rtex binary. Empty means the one installed by **Install rtex**, then `rtex` on `PATH`. |
 | `realtimeTex.texliveBin` | *(PATH)* | Folder containing `lualatex`. |
 | `realtimeTex.texDir` | *(auto)* | rtex's `tex/` folder. Only needed if you moved the binary away from its checkout. |
-| `realtimeTex.updateCheck` | `notify` | Once a day, check realtime-tex `main` for a newer engine: `notify` offers the update, `auto` updates and rebuilds by itself, `off` never checks. The setting has an **Update rtex now** link. |
+| `realtimeTex.updateCheck` | `notify` | Once a day, check the engine's repository and branch for a newer engine: `notify` offers the update, `auto` updates and rebuilds by itself, `off` never checks. The setting has an **Update rtex now** link. |
+| `realtimeTex.engine.repository` | *(realtime-tex)* | Git repository **Install rtex** and **Update rtex Engine** build from, e.g. a fork. |
+| `realtimeTex.engine.branch` | `main` | Branch of that repository. Changing either and running **Update rtex Engine** switches the managed checkout. |
 | `realtimeTex.engine.eligibility` | `probe` | How rtex picks the parts that update live: `probe` (compare a live result with the last full compile) or `allowlist` (only known-safe commands). |
 | `realtimeTex.engine.fastBudgetMs` | `5` | Time budget for re-typesetting one part live; a part that takes longer three times in a row waits for the full compile. |
 | `realtimeTex.engine.pictureCache` | `true` | Reuse unchanged TikZ pictures from the previous full compile. |
@@ -135,6 +141,25 @@ RTEX_E2E_TEXLIVE_BIN=/path/to/texlive/2026/bin/x86_64-linux \
 xvfb-run -a npm run test:e2e
 ```
 
+### Render check
+
+`test/render` draws rtex page lists with the preview's own drawing code in headless Chromium and
+compares the result with MuPDF's rendering of the PDF. It needs realtime-tex's `gfx_dump` example,
+playwright-core with a Chromium, and PyMuPDF:
+
+```bash
+npm run build:render
+# page*.json: page lists saved by rtex (verify or the native_session example); layout.pdf: their PDF
+/path/to/realtime-tex/target/debug/examples/gfx_dump BUILD/page*.json > gfx.jsonl
+CHROMIUM=/path/to/chrome PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core \
+  node out/render/run.js OUT 150 gfx.jsonl      # OUT/pageN.png, OUT/summary.json
+python3 test/render/compare.py BUILD/layout.pdf OUT 150 --diff 3   # per-page diff, 3 diff images
+```
+
+The check loads fonts the way the extension does but not raster images (such pages report "an
+image has no source file"; the preview itself loads them), so it covers text, rules and native
+drawing.
+
 ### Layout
 
 | Path | |
@@ -147,6 +172,8 @@ xvfb-run -a npm run test:e2e
 | `src/preview/panel.ts` | The webview panel and its message protocol |
 | `src/setup.ts`, `src/config.ts` | Setup check, rtex/TeX Live installation, settings |
 | `webview/` | The preview: page/overlay model, canvas renderer, pdf.js fallback, toolbar |
+| `webview/native.ts` | Native drawing: which pages qualify, ops by item, colors, shading geometry |
+| `test/render/` | Render check against MuPDF (above) |
 
 ## License
 

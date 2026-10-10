@@ -6,8 +6,16 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { cfg, managedCheckout, processEnv, resolveServer } from './config';
 
-const REPO_URL = 'https://github.com/HenryXiaoYang/realtime-tex';
-const BRANCH = 'main';
+const DEFAULT_REPO = 'https://github.com/HenryXiaoYang/realtime-tex';
+const DEFAULT_BRANCH = 'main';
+
+/** Where the managed rtex comes from: `realtimeTex.engine.repository` / `.branch` (a fork, a
+ * feature branch), else realtime-tex `main`. */
+export function engineSource(): { repo: string; branch: string } {
+  const repo = cfg().get<string>('engine.repository', '').trim() || DEFAULT_REPO;
+  const branch = cfg().get<string>('engine.branch', '').trim() || DEFAULT_BRANCH;
+  return { repo, branch };
+}
 
 interface RunResult {
   ok: boolean;
@@ -186,11 +194,14 @@ async function runTask(name: string, cwd: string, script: string): Promise<boole
  * to the extension; local changes in it stop the update instead of being thrown away. */
 function cloneScript(dir: string): string {
   const d = sq(dir);
+  const { repo, branch } = engineSource();
   return [
     `if [ -d ${sq(path.join(dir, '.git'))} ]; then`,
     `  if [ -n "$(git -C ${d} status --porcelain --untracked-files=no)" ]; then echo "${dir} has local changes; not updating it." >&2; exit 3; fi;`,
-    `  git -C ${d} fetch --depth 1 origin ${BRANCH} && git -C ${d} reset --hard FETCH_HEAD;`,
-    `else git clone --depth 1 --branch ${BRANCH} ${REPO_URL} ${d}; fi`,
+    // the repository setting may have changed since the checkout was made
+    `  git -C ${d} remote set-url origin ${sq(repo)};`,
+    `  git -C ${d} fetch --depth 1 origin ${sq(branch)} && git -C ${d} reset --hard FETCH_HEAD;`,
+    `else git clone --depth 1 --branch ${sq(branch)} ${sq(repo)} ${d}; fi`,
   ].join(' ');
 }
 
@@ -298,7 +309,9 @@ export async function checkForRtexUpdate(ctx: vscode.ExtensionContext, onDone: (
   if (Date.now() - last < DAY) return;
   void ctx.globalState.update(LAST_CHECK, Date.now());
   const dir = managedCheckout(ctx);
-  const fetch = await run('git', ['-C', dir, 'fetch', '--depth', '1', 'origin', BRANCH], undefined, 30000);
+  const { repo, branch } = engineSource();
+  // compare with the configured source, not whatever the checkout was cloned from
+  const fetch = await run('git', ['-C', dir, 'fetch', '--depth', '1', repo, branch], undefined, 30000);
   if (!fetch.ok) return; // offline: try again another day
   const [head, latest] = await Promise.all([run('git', ['-C', dir, 'rev-parse', 'HEAD']), run('git', ['-C', dir, 'rev-parse', 'FETCH_HEAD'])]);
   if (!head.ok || !latest.ok || head.stdout.trim() === latest.stdout.trim()) return;

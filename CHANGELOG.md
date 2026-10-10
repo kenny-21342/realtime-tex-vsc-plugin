@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- Native TikZ drawing: pages rtex sends with a `native` drawing (pgf paths, fills, strokes, dashes,
+  clips, opacity, axial/radial shadings, transformed node text) are drawn on the canvas instead of
+  from the PDF. Needs an rtex with native drawing (realtime-tex docs/DISPLAY_LIST.md, "Native
+  drawing"); with older builds those pages still come from the PDF.
+- Cached TikZ pictures on native pages are found through the page's `pictures` spots and matched by
+  cache key (`file:line`), so they stay in place while you edit around them.
+- `realtimeTex.engine.repository` and `realtimeTex.engine.branch`: build the managed engine from a
+  fork or a branch; **Update rtex Engine** and the daily check follow them.
+- Render check (`npm run build:render`, `test/render/`): the preview's drawing code against MuPDF.
+- CMYK colors (text and drawings) are converted the way pdf.js converts them, so a page looks the
+  same drawn natively or from the PDF (CMYK magenta was #ff00ff before).
+- Glyphs LuaTeX does not write to the PDF (a font with no name or file, such as pgf's `\nullfont`;
+  a character an OpenType font lacks) are skipped instead of sending the page to the PDF.
+
 ## 0.0.1
 
 First release.

@@ -3,6 +3,7 @@ import type { Action, HostToWebview, PillKind, ScreenKind, WebviewToHost } from 
 import { SP_PER_BP } from '../src/protocol';
 import { cachedPictureMoves, PreviewModel, Rect } from './model';
 import { initPdfWorker, openPdf, PdfDoc, rasterizePdfImage, renderPdfPage } from './pdf';
+import { indexNative, nativeOf } from './native';
 import { FontStore, ImageStore, inexactReason, Mat, Painter } from './render';
 
 interface VsCodeApi {
@@ -267,13 +268,19 @@ async function renderPage(n: number): Promise<void> {
 
   const hidden = model.hiddenLines(n);
   const lines = pu.dl.lines.filter((_, i) => !hidden.has(i));
-  const reason = pu.exact ? inexactReason(pu.dl, fonts, images, lines) : 'contains material the live renderer cannot draw (e.g. TikZ)';
+  // a degraded page rtex can draw natively (TikZ) is drawn like an exact one, with its drawing
+  // operations among the items
+  const native = nativeOf(pu);
+  const reason = pu.exact || native ? inexactReason(pu.dl, fonts, images, lines, native !== undefined) : 'contains material the live renderer cannot draw (e.g. TikZ)';
   const usePdf = reason !== undefined && pdfDoc !== undefined && n <= pdfPages;
   const doc = pdfDoc;
   const drawDisplayList = () => {
     const p = new Painter(ctx, base, fonts, images);
-    p.draw(pu.dl, pu.dl.other ?? []);
-    for (const line of lines) p.draw(pu.dl, line.items);
+    const rows = native ? indexNative(native) : undefined;
+    p.draw(pu.dl, pu.dl.other ?? [], 0, 0, rows?.get(null));
+    pu.dl.lines.forEach((line, i) => {
+      if (!hidden.has(i)) p.draw(pu.dl, line.items, 0, 0, rows?.get(i));
+    });
   };
   let pdfFailed = false;
   const overlays = model.overlaysOn(n);
@@ -282,6 +289,13 @@ async function renderPage(n: number): Promise<void> {
   // (the last full compile) drew the picture; it is cleared so a picture the edit moved does
   // not stay behind at its old place while its copy is drawn at the new one (two graphs).
   let pictureSnaps: { img: ImageData; src: Rect; dst: Rect }[] = [];
+  const snapPictures = () =>
+    overlays.flatMap(({ rows }) =>
+      cachedPictureMoves(pu.dl, rows).flatMap(({ src, dst }) => {
+        const img = grabRect(ctx, base, src);
+        return img ? [{ img, src, dst }] : [];
+      }),
+    );
   if (usePdf && doc) {
     try {
       await renderPdfPage(doc, n, ctx, w, h);
@@ -291,14 +305,7 @@ async function renderPage(n: number): Promise<void> {
       post({ type: 'log', message: `pdf page ${n}: ${String(e)}` });
     }
     if (renderToken.get(n) !== token) return;
-    if (!pdfFailed) {
-      pictureSnaps = overlays.flatMap(({ rows }) =>
-        cachedPictureMoves(pu.dl, rows).flatMap(({ src, dst }) => {
-          const img = grabRect(ctx, base, src);
-          return img ? [{ img, src, dst }] : [];
-        }),
-      );
-    }
+    if (!pdfFailed) pictureSnaps = snapPictures();
     if (pdfFailed) {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.fillStyle = '#fff';
@@ -312,6 +319,8 @@ async function renderPage(n: number): Promise<void> {
     }
   } else {
     drawDisplayList();
+    // a natively drawn page holds the pictures too: live units carry them along the same way
+    if (native) pictureSnaps = snapPictures();
   }
   // clear each moved picture's old place (where the page drew it) before anything live is
   // drawn: the picture is stamped at its new place below and the live rows may now run

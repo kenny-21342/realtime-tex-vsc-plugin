@@ -8,6 +8,12 @@ export function fontKey(desc: FontDesc): string {
   return `tfm:${desc.name ?? desc.id}`;
 }
 
+/** A font with neither a name nor a file (pgf's \nullfont inside a picture, for one): its
+ * characters are not in the PDF, so there is nothing to load or draw. */
+export function isNullFont(desc: FontDesc): boolean {
+  return !desc.name && !desc.filename && !desc.psname && !desc.fullname;
+}
+
 /** Font resources the webview can draw. */
 export type FontResource =
   | { kind: 'sfnt'; data: Uint8Array }

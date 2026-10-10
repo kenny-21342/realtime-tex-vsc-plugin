@@ -203,13 +203,17 @@ export interface Rect {
 
 /** A picture rtex reused from its picture cache: `["u", "cached_picture", "<index> <x> <top> <width> <height>"]`
  * (rtex f345c45; sp, in the list's frame). Undefined for any other item. */
-export function cachedPicture(it: Item): (Rect & { index: number }) | undefined {
+/** A cached picture item: "<index> <x> <top> <width> <height>[ <key>]" (newer rtex names the
+ * picture's cache key, `file:line`, last). */
+export function cachedPicture(it: Item): (Rect & { index: number; key?: string }) | undefined {
   if (it[0] !== 'u' || it[1] !== 'cached_picture') return undefined;
   const raw = it[2];
-  const v = (Array.isArray(raw) ? raw : String(raw ?? '').trim().split(/\s+/)).map(Number);
+  const parts = Array.isArray(raw) ? raw.map(String) : String(raw ?? '').trim().split(/\s+/);
+  const v = parts.slice(0, 5).map(Number);
   if (v.length < 5 || !v.every(Number.isFinite)) return undefined;
   const [index, x, y, w, h] = v;
-  return w > 0 && h > 0 ? { index, x, y, w, h } : undefined;
+  if (!(w > 0 && h > 0)) return undefined;
+  return parts.length > 5 ? { index, x, y, w, h, key: parts.slice(5).join(' ') } : { index, x, y, w, h };
 }
 
 /**
@@ -220,7 +224,7 @@ export function cachedPicture(it: Item): (Rect & { index: number }) | undefined 
  * else by size; a picture with no counterpart on the page is skipped.
  */
 export function cachedPictureMoves(page: DisplayList, rows: readonly OverlayRow[]): { src: Rect; dst: Rect }[] {
-  const onPage: (Rect & { index: number })[] = [];
+  const onPage: (Rect & { index: number; key?: string })[] = [];
   for (const it of page.other ?? []) {
     const c = cachedPicture(it);
     if (c) onPage.push(c);
@@ -231,6 +235,8 @@ export function cachedPictureMoves(page: DisplayList, rows: readonly OverlayRow[
       if (c) onPage.push(c);
     }
   }
+  // pictures a natively drawn page draws from the cache's stored drawing
+  for (const p of page.pictures ?? []) onPage.push({ index: -1, key: p.key, x: p.x, y: p.top, w: p.width, h: p.height });
   const used = new Set<number>();
   const out: { src: Rect; dst: Rect }[] = [];
   for (const { line, dx, dy } of rows) {
@@ -238,7 +244,8 @@ export function cachedPictureMoves(page: DisplayList, rows: readonly OverlayRow[
       const c = cachedPicture(it);
       if (!c) continue;
       const same = (k: number) => !used.has(k) && Math.abs(onPage[k].w - c.w) <= 2 && Math.abs(onPage[k].h - c.h) <= 2;
-      let k = onPage.findIndex((p, i) => p.index === c.index && same(i));
+      let k = c.key ? onPage.findIndex((p, i) => p.key === c.key && same(i)) : -1;
+      if (k < 0) k = onPage.findIndex((p, i) => p.index === c.index && same(i));
       if (k < 0) k = onPage.findIndex((_, i) => same(i));
       if (k < 0) continue;
       used.add(k);
