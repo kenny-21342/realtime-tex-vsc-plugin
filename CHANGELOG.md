@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The engine comes from the fork by default: **Install rtex** downloads the releases of
+  [kenny-21342/realtime-tex](https://github.com/kenny-21342/realtime-tex/releases) (upstream's lack
+  the fork's work), and **Build from Source** builds its `kenny/main` (its `main` mirrors upstream)
+  when `realtimeTex.engine.branch` is empty. `realtimeTex.engine.repository` still picks another
+  repository, upstream included, and then the empty branch means `main`.
 - The extension updates itself from GitHub: every push to `main` is built and published as the
   rolling `main-build` prerelease (version `<next patch>-main.<run>`), and once a day the extension
   downloads a newer `.vsix`, checks its SHA-256, installs it and offers **Reload Window**.

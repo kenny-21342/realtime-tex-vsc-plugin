@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assetName, assetUrl, compareVersions, githubRepo, isNewer, parseVersion, releaseTarget, sha256For, vsixAsset } from '../src/release';
+import { assetName, assetUrl, compareVersions, defaultBranch, githubRepo, isNewer, parseVersion, releaseTarget, sha256For, vsixAsset } from '../src/release';
 
 test('each supported machine maps to its release archive', () => {
   assert.equal(assetName(releaseTarget('linux', 'x64')!), 'rtex-x86_64-unknown-linux-gnu.tar.gz');
@@ -12,8 +12,16 @@ test('each supported machine maps to its release archive', () => {
   assert.equal(releaseTarget('freebsd', 'x64'), undefined);
   assert.equal(
     assetUrl('v0.0.2', releaseTarget('linux', 'x64')!),
-    'https://github.com/HenryXiaoYang/realtime-tex/releases/download/v0.0.2/rtex-x86_64-unknown-linux-gnu.tar.gz',
+    'https://github.com/kenny-21342/realtime-tex/releases/download/v0.0.2/rtex-x86_64-unknown-linux-gnu.tar.gz',
   );
+});
+
+test('the fork builds its working branch, any other repository main', () => {
+  assert.equal(defaultBranch('https://github.com/kenny-21342/realtime-tex'), 'kenny/main');
+  assert.equal(defaultBranch('https://github.com/Kenny-21342/realtime-tex.git'), 'kenny/main');
+  assert.equal(defaultBranch('kenny-21342/realtime-tex'), 'kenny/main');
+  assert.equal(defaultBranch('https://github.com/HenryXiaoYang/realtime-tex'), 'main');
+  assert.equal(defaultBranch('https://gitlab.com/someone/realtime-tex'), 'main');
 });
 
 test('versions compare numerically', () => {
