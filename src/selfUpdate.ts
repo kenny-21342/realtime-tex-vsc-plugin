@@ -72,7 +72,9 @@ export async function checkForExtensionUpdate(ctx: vscode.ExtensionContext, manu
       const want = sha256For(await getText(asset.sha256Url), asset.name);
       if (!want || want !== (await sha256File(file))) throw new Error(`${asset.name} does not match its published checksum`);
     }
-    await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.joinPath(ctx.globalStorageUri, 'extension-updates', asset.name));
+    // a file: URI: the installer takes only file: and vscode-remote: ones, and globalStorageUri
+    // has the vscode-userdata: scheme (installing from it fails with "No Servers")
+    await vscode.commands.executeCommand('workbench.extensions.installExtension', vscode.Uri.file(file));
   } catch (e) {
     await fs.rm(file, { force: true });
     void vscode.window.showErrorMessage(`Updating Realtime TeX to ${asset.version} failed: ${e instanceof Error ? e.message : String(e)}`);
