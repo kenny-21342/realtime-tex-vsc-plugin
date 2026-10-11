@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- While an edit leaves a TikZ picture with errors (a half-typed coordinate), the preview keeps its
+  last good version, outlined and labelled "editing", until the errors are fixed, instead of losing
+  the picture. rtex 0.0.6 holds the picture in full compiles (`LayoutUpdate.held`); a live result
+  with errors no longer blanks the part being typed either (its previous drawing stays, outlined).
+  Setting `realtimeTex.engine.holdBrokenPictures` (on by default); the status pill's tooltip says
+  when something is held.
 - Self-update: installing the downloaded `.vsix` failed with "No Servers" (it was passed to VS Code
   under the `vscode-userdata:` scheme of the extension's storage; the installer takes `file:` URIs).
 - The engine comes from the fork by default: **Install rtex** downloads the releases of

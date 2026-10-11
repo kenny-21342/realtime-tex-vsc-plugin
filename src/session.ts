@@ -5,7 +5,7 @@ import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { PreviewModel } from '../webview/model';
-import { buildDirFor, debugDir, engineArgs, exportPathFor, processEnv, resolveServer, ServerLocation } from './config';
+import { buildDirFor, debugDir, engineArgs, exportPathFor, holdBrokenParts, processEnv, resolveServer, ServerLocation } from './config';
 import { ShadowText } from './edits';
 import { LiveGutter } from './gutter';
 import type { LiveMark } from './liveMarks';
@@ -14,6 +14,7 @@ import type {
   Diagnostic as RtexDiagnostic,
   EditResult,
   Fragment,
+  HeldPicture,
   LayoutUpdateEvent,
   ParagraphUpdateEvent,
   PdfExportedEvent,
@@ -38,6 +39,7 @@ export type SessionOutput =
   | { kind: 'layout'; ev: LayoutUpdateEvent; keepFromRevision: number | null; pdfPath: string }
   | { kind: 'paragraph'; ev: ParagraphUpdateEvent }
   | { kind: 'dropOverlays'; parIds?: number[] }
+  | { kind: 'held'; units: { parId: number; line?: number }[] }
   | { kind: 'reveal'; target: PreviewTarget; force: boolean }
   | { kind: 'banner'; text: string | null; level?: 'info' | 'warn' | 'error'; actions?: Action[] };
 
@@ -64,6 +66,10 @@ export class Session implements vscode.Disposable {
   private spansCache = new Map<string, Promise<Span[]>>();
   private generation = -1;
   private bgDiagnosticsThisPass = false;
+  /** Units whose live result had errors: their previous drawing stays (realtimeTex.engine.holdBrokenPictures). */
+  private liveHeld = new Set<number>();
+  /** Pictures the last layout shows in their last good version. */
+  private layoutHeld: HeldPicture[] = [];
   private diags = new Map<string, RtexDiagnostic[]>();
   private exports = new Map<number, (ev: PdfExportedEvent) => void>();
   private pendingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -477,6 +483,16 @@ export class Session implements vscode.Disposable {
           this.outputEmitter.fire({ kind: 'paragraph', ev });
           break;
         }
+        if (ev.status === 'error' && holdBrokenParts(vscode.Uri.file(this.mainFile)) && this.model.shows(ev.par_id)) {
+          // a live result with errors (a half-typed coordinate, an unclosed brace): the unit's
+          // previous drawing stays, outlined, until a result without errors replaces it
+          this.liveHeld.add(ev.par_id);
+          this.setDiagnostics('live', ev.diagnostics);
+          this.emitHeld();
+          this.emitStatus();
+          break;
+        }
+        if (this.liveHeld.delete(ev.par_id)) this.emitHeld();
         this.statusValue.lastFastMs = ev.timing.total_us / 1000;
         this.lastLoggedRoute = '';
         // a summary line at most every 5 s while typing
@@ -535,6 +551,9 @@ export class Session implements vscode.Disposable {
     this.setDiagnostics('live', []);
     const keepFromRevision = ev.convergence.state === 'Stale' ? ev.convergence.pending_since : null;
     this.model.applyLayout({ pages: ev.pages_changed, pagesTotal: ev.pages_total, placements: ev.placements, keepFromRevision });
+    // a layout replaces the live results; what it holds is its own list
+    this.liveHeld.clear();
+    this.layoutHeld = ev.held ?? [];
     this.statusValue.convergence = ev.convergence;
     this.statusValue.compile = ev.compile;
     this.statusValue.pagesTotal = ev.pages_total;
@@ -548,6 +567,20 @@ export class Session implements vscode.Disposable {
     this.outputEmitter.fire({ kind: 'banner', text: null });
     this.emitStatus();
     this.outputEmitter.fire({ kind: 'layout', ev, keepFromRevision, pdfPath: ev.pdf_fallback ?? this.pdfPath });
+    this.emitHeld();
+  }
+
+  /** The units shown in their last good version, for the preview's outlines and the status. */
+  get heldUnits(): { parId: number; line?: number }[] {
+    const units: { parId: number; line?: number }[] = this.layoutHeld.map((h) => ({ parId: h.par_id, line: h.line }));
+    for (const id of this.liveHeld) if (!units.some((u) => u.parId === id)) units.push({ parId: id });
+    return units;
+  }
+
+  private emitHeld(): void {
+    const units = this.heldUnits;
+    this.statusValue.held = units.length;
+    this.outputEmitter.fire({ kind: 'held', units });
   }
 
   /**

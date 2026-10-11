@@ -130,6 +130,28 @@ async function steps(): Promise<void> {
     step('TikZ page shown from the PDF');
   }
 
+  // 5b. a half-typed coordinate in the TikZ picture: the picture keeps its last good version,
+  // outlined, until the coordinate is complete (rtex ≥ 0.0.6, held pictures)
+  if (s.model.pagesTotal >= 2 && !process.env.RTEX_E2E_SKIP_HELD) {
+    const intro = await vscode.workspace.openTextDocument(path.join(folder, 'intro.tex'));
+    const ed = await vscode.window.showTextDocument(intro, vscode.ViewColumn.One);
+    const full = '(4.5,1.5)';
+    const at = intro.getText().indexOf(full);
+    if (at < 0) throw new Error('the picture coordinate is not in intro.tex');
+    const pageBefore = s.model.pages.get(2);
+    await ed.edit((e) => e.replace(new vscode.Range(intro.positionAt(at), intro.positionAt(at + full.length)), '(4.5,'));
+    await waitFor('the picture to be held', () => (s.status.held ?? 0) > 0, 120000);
+    if (s.model.pages.get(2) !== pageBefore && s.model.pages.get(2)?.hash !== pageBefore?.hash) throw new Error('the page with the held picture changed');
+    step(`broken picture held (${s.heldUnits.map((u) => `line ${u.line ?? '?'}`).join(', ')}), its page unchanged`);
+    await api.panel()!.panel.webview.postMessage({ type: 'reveal', page: 2, x: 0, y: 0, force: true });
+    await sleep(2500);
+    await screenshot('4c-held-picture.png');
+    const at2 = intro.getText().indexOf('(4.5,');
+    await ed.edit((e) => e.replace(new vscode.Range(intro.positionAt(at2), intro.positionAt(at2 + '(4.5,'.length)), '(4.5,1.6)'));
+    await waitFor('the edited picture', () => (s.status.held ?? 0) === 0 && s.status.compile?.state === 'Ok', 120000);
+    step('the completed coordinate replaced the held picture');
+  }
+
   // 6. export
   const pdf = await s.exportPdf();
   if (!pdf || !existsSync(pdf)) throw new Error(`export produced no PDF (${pdf})`);

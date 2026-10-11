@@ -263,6 +263,19 @@ export interface LayoutUpdateEvent {
   eligible_paragraphs: number[];
   pdf_fallback: string | null;
   wall_ms: number;
+  /** Pictures shown in their last good version while their source has errors (rtex ≥ 0.0.6). */
+  held?: HeldPicture[];
+}
+
+/** A picture rtex shows in its last good version (realtime-tex docs/how-it-works.md, "Held pictures"). */
+export interface HeldPicture {
+  /** The unit (span) that shows it; the placements give its place. */
+  par_id: number;
+  file: string;
+  /** 1-based `\begin` and `\end` lines. */
+  line: number;
+  end_line: number;
+  since_revision: number;
 }
 
 export interface DiagnosticsEvent {

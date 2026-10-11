@@ -337,6 +337,11 @@
           "default": true,
           "markdownDescription": "Reuse unchanged TikZ pictures from the previous full compile, which makes full compiles of drawing-heavy documents several times faster. Changing it restarts the engine."
         },
+        "realtimeTex.engine.holdBrokenPictures": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "While an edit leaves a TikZ picture (or a part typeset live) with errors, for example a half-typed coordinate, keep showing its last good version, outlined, until the errors are fixed. Turn off to see the broken output at once. Needs rtex 0.0.6 or later. Changing it restarts the engine."
+        },
         "realtimeTex.mainFile": {
           "type": "string",
           "default": "",

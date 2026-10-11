@@ -62,6 +62,11 @@ keystroke. Everything else updates with the next full compile, typically a secon
 The pill says when this is happening. See rtex's
 [live editing guide](https://github.com/kenny-21342/realtime-tex/blob/kenny/main/docs/live-editing.md) for details.
 
+**While you type something incomplete**, such as a half-typed coordinate in a TikZ picture, the
+preview keeps showing the last good version of that picture (or of the part typed live), with a
+dashed amber outline labelled "editing", until the errors are fixed. The errors still show in the
+Problems panel. It needs rtex 0.0.6 or later; `realtimeTex.engine.holdBrokenPictures` turns it off.
+
 For the fastest updates, use TFM fonts (the default, `lmodern`, …) or OpenType fonts loaded with
 `Renderer=Basic`. fontspec's default node mode works, but each keystroke takes longer.
 
@@ -100,6 +105,7 @@ PDF, as before.
 | `realtimeTex.engine.fastBudgetFactor` | `4` | The budget follows the document: a part is only too slow when it also takes longer than this many times the document's typical live update (`0`: the fixed budget alone). |
 | `realtimeTex.engine.passTimeoutSeconds` | `120` | A full compile still running after this long is stopped (a document that loops forever). |
 | `realtimeTex.engine.pictureCache` | `true` | Reuse unchanged TikZ pictures from the previous full compile. |
+| `realtimeTex.engine.holdBrokenPictures` | `true` | While an edit leaves a TikZ picture (or a part typeset live) with errors, keep showing its last good version, outlined, until the errors are fixed. |
 | `realtimeTex.debug.enabled` | `false` | rtex saves a debug bundle (source, context, trace, TeX log) whenever the live engine hangs or crashes, and lists every live compile in `requests.log`. **Open Debug Folder** shows them. |
 | `realtimeTex.debug.directory` | *(storage)* | Where debug bundles go. |
 | `realtimeTex.mainFile` | *(auto)* | Main file, relative to the workspace folder. |

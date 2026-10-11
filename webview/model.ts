@@ -83,6 +83,47 @@ export class PreviewModel {
     return dirty;
   }
 
+  /** Whether the preview shows something for unit `parId` (a live result, or layout rows). */
+  shows(parId: number): boolean {
+    return this.overlays.has(parId) || (this.placements.get(parId)?.length ?? 0) > 0;
+  }
+
+  /**
+   * Boxes (sp, page coordinates: left, top, width, height) around what unit `parId` shows on
+   * `page`: its live rows when it has a live result, else its rows in the layout. One box per
+   * unit and page (the union), for the outline of a held unit.
+   */
+  unitBox(page: number, parId: number): { x: number; y: number; w: number; h: number } | undefined {
+    const boxes: [number, number, number, number][] = [];
+    const ov = this.overlays.get(parId);
+    if (ov) {
+      for (const po of this.overlaysOn(page)) {
+        if (po.overlay.parId !== parId) continue;
+        for (const r of po.rows) boxes.push([r.line.x + r.dx, r.line.y + r.dy - r.line.h, r.line.w, r.line.h + r.line.d]);
+      }
+    } else {
+      const pu = this.pages.get(page);
+      if (pu) for (const i of this.ownLines(page, parId)) {
+        const l = pu.dl.lines[i];
+        boxes.push([l.x, l.y - l.h, l.w, l.h + l.d]);
+      }
+    }
+    if (!boxes.length) return undefined;
+    const x0 = Math.min(...boxes.map((b) => b[0]));
+    const y0 = Math.min(...boxes.map((b) => b[1]));
+    const x1 = Math.max(...boxes.map((b) => b[0] + b[2]));
+    const y1 = Math.max(...boxes.map((b) => b[1] + b[3]));
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+
+  /** The pages unit `parId` shows on (live rows and layout rows). */
+  unitPages(parId: number): Set<number> {
+    const pages = new Set<number>();
+    for (const f of this.overlays.get(parId)?.fragments ?? []) pages.add(f.page);
+    for (const f of this.placements.get(parId) ?? []) pages.add(f.page);
+    return pages;
+  }
+
   /** Drop overlays (all when `ids` is undefined). Returns the pages to redraw. */
   dropOverlays(ids?: number[]): Set<number> {
     const dirty = new Set<number>();
