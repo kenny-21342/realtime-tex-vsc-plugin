@@ -40,7 +40,7 @@ function get(url: string, headers: Record<string, string> = UA, redirects = 6): 
   });
 }
 
-async function getText(url: string, headers: Record<string, string> = UA): Promise<string> {
+export async function getText(url: string, headers: Record<string, string> = UA): Promise<string> {
   const res = await get(url, headers);
   const chunks: Buffer[] = [];
   for await (const c of res) chunks.push(c as Buffer);
@@ -69,7 +69,7 @@ export async function latestReleaseTag(): Promise<string> {
   });
 }
 
-async function download(url: string, file: string, onProgress: (fraction: number) => void): Promise<void> {
+export async function download(url: string, file: string, onProgress: (fraction: number) => void): Promise<void> {
   const res = await get(url);
   const total = Number(res.headers['content-length'] ?? 0);
   let got = 0;
@@ -86,7 +86,7 @@ async function download(url: string, file: string, onProgress: (fraction: number
   });
 }
 
-async function sha256File(file: string): Promise<string> {
+export async function sha256File(file: string): Promise<string> {
   const h = createHash('sha256');
   h.update(await fs.readFile(file));
   return h.digest('hex');

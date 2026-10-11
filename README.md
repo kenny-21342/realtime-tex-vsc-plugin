@@ -24,6 +24,8 @@ On first use, the preview walks you through anything that is missing:
 
 The extension keeps the rtex it installed up to date, the way it was installed: a downloaded rtex updates to the latest release, one built from source pulls realtime-tex `main` and rebuilds it. It checks once a day and offers **Update Now**; **Realtime TeX: Update rtex Engine** updates on demand and restarts the engine. The `realtimeTex.updateCheck` setting controls this.
 
+The extension updates itself too. It is not on the Marketplace: every change merged into this repository's `main` is built and published as the `main-build` prerelease, and once a day the extension installs a newer build by itself (checked against its published SHA-256), then offers **Reload Window**. `realtimeTex.extensionUpdates` picks `main` (every merged change, the default), `releases` (tagged releases only) or `off`; **Realtime TeX: Check for Extension Updates** checks now.
+
 ## Using the preview
 
 | | |
@@ -89,6 +91,8 @@ PDF, as before.
 | `realtimeTex.texDir` | *(auto)* | rtex's `tex/` support files. Only needed if you moved the binary away from them. |
 | `realtimeTex.installFrom` | `release` | What **Install rtex** does: `release` downloads the prebuilt engine, `source` builds `realtimeTex.engine.repository` with `cargo`. |
 | `realtimeTex.updateCheck` | `notify` | Once a day, check for a newer engine (a new release, or new commits on the engine's repository and branch for a source build): `notify` offers the update, `auto` updates by itself, `off` never checks. The setting has an **Update rtex now** link. |
+| `realtimeTex.extensionUpdates` | `main` | Once a day, install a newer version of this extension: `main` the latest build of `main` (every merged change), `releases` the latest tagged release, `off` never (use **Check for Extension Updates**). |
+| `realtimeTex.extensionRepository` | *(this repository)* | GitHub repository (`owner/name` or URL) the extension updates itself from. |
 | `realtimeTex.engine.repository` | *(realtime-tex)* | Git repository the engine comes from, e.g. a fork: built from source, and when it is on GitHub, the repository whose releases **Install rtex** downloads. |
 | `realtimeTex.engine.branch` | `main` | Branch of that repository for source builds. Changing either and running **Update rtex Engine** switches the managed checkout. |
 | `realtimeTex.engine.eligibility` | `probe` | How rtex picks the parts that update live: `probe` (compare a live result with the last full compile) or `allowlist` (only known-safe commands). |
@@ -124,6 +128,7 @@ All commands are under **Realtime TeX:** in the command palette:
 - **Install rtex**
 - **Install rtex (Build from Source)**
 - **Update rtex Engine**
+- **Check for Extension Updates**
 - **Locate rtex Binary…**
 - **Choose Main File…**
 - **Get Started**

@@ -72,3 +72,51 @@ export function sha256For(text: string, file: string): string | undefined {
   }
   return undefined;
 }
+
+/** Semver order of two versions, prerelease identifiers included (`0.0.2-main.5` sorts after
+ * `0.0.1` and before `0.0.2`; numeric identifiers compare as numbers): <0, 0 or >0. A leading
+ * `v` is ignored. */
+export function compareVersions(a: string, b: string): number {
+  const split = (v: string) => {
+    const [core, pre] = v.trim().replace(/^v/, '').split('+')[0].split(/-(.*)/s, 2);
+    return { core: core.split('.').map((n) => Number(n) || 0), pre: pre ? pre.split('.') : [] };
+  };
+  const x = split(a);
+  const y = split(b);
+  for (let i = 0; i < Math.max(x.core.length, y.core.length); i++) {
+    const d = (x.core[i] ?? 0) - (y.core[i] ?? 0);
+    if (d) return d;
+  }
+  // a release is newer than its prereleases
+  if (!x.pre.length || !y.pre.length) return y.pre.length - x.pre.length;
+  for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i++) {
+    const p = x.pre[i];
+    const q = y.pre[i];
+    if (p === undefined || q === undefined) return p === undefined ? -1 : 1;
+    const pn = /^\d+$/.test(p);
+    const qn = /^\d+$/.test(q);
+    if (pn && qn) {
+      const d = Number(p) - Number(q);
+      if (d) return d;
+    } else if (pn !== qn) return pn ? -1 : 1;
+    else if (p !== q) return p < q ? -1 : 1;
+  }
+  return 0;
+}
+
+export interface ReleaseAsset {
+  name: string;
+  browser_download_url: string;
+}
+
+/** The extension's package in a release's assets (`realtime-tex-<version>.vsix`), its version,
+ * and its `.sha256` file when the release has one. */
+export function vsixAsset(assets: readonly ReleaseAsset[]): { name: string; version: string; url: string; sha256Url?: string } | undefined {
+  for (const a of assets) {
+    const m = /^realtime-tex-(\d[\w.+-]*)\.vsix$/.exec(a.name);
+    if (!m) continue;
+    const sum = assets.find((s) => s.name === `${a.name}.sha256`);
+    return { name: a.name, version: m[1], url: a.browser_download_url, sha256Url: sum?.browser_download_url };
+  }
+  return undefined;
+}

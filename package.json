@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/HenryXiaoYang/realtime-tex-vsc-plugin"
+    "url": "https://github.com/kenny-21342/realtime-tex-vsc-plugin"
   },
   "engines": {
     "vscode": "^1.85.0"
@@ -114,6 +114,11 @@
         "title": "Update rtex Engine",
         "category": "Realtime TeX",
         "icon": "$(cloud-download)"
+      },
+      {
+        "command": "realtimeTex.checkExtensionUpdate",
+        "title": "Check for Extension Updates",
+        "category": "Realtime TeX"
       },
       {
         "command": "realtimeTex.selectServerPath",
@@ -242,6 +247,28 @@
           "default": "release",
           "markdownDescription": "What **Install rtex** does. Updates follow the way the rtex in use was installed. Building from source is also available any time as **Realtime TeX: Install rtex (Build from Source)**.\n\n[Install rtex now](command:realtimeTex.installRtex)",
           "scope": "machine"
+        },
+        "realtimeTex.extensionUpdates": {
+          "type": "string",
+          "enum": [
+            "main",
+            "releases",
+            "off"
+          ],
+          "enumDescriptions": [
+            "Once a day, install the latest build of the extension's main branch (every merged change)",
+            "Once a day, install the latest tagged release",
+            "Never update by itself; use Realtime TeX: Check for Extension Updates"
+          ],
+          "default": "main",
+          "scope": "application",
+          "markdownDescription": "Keep this extension up to date by itself. It is not on the Marketplace: a newer `.vsix` is downloaded from the GitHub repository of `#realtimeTex.extensionRepository#` (the extension's own repository by default), checked against its published SHA-256 and installed; **Reload Window** then runs it."
+        },
+        "realtimeTex.extensionRepository": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "GitHub repository the extension updates itself from (`owner/name` or its URL). Empty: the repository the extension was built from."
         },
         "realtimeTex.updateCheck": {
           "type": "string",

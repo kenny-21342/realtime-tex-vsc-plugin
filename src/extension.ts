@@ -7,6 +7,7 @@ import { ResourceLoader } from './resources';
 import { findMainFile, isMainFile } from './root';
 import { Session } from './session';
 import { pruneReleases } from './prebuilt';
+import { checkForExtensionUpdate } from './selfUpdate';
 import { buildFromSource, checkForRtexUpdate, checkSetup, installRtex, selectServerPath, updateRtex } from './setup';
 import { StatusBar } from './statusBar';
 
@@ -54,6 +55,7 @@ export function activate(context: vscode.ExtensionContext): Api {
   reg('realtimeTex.installRtex', () => installRtex(ctx, restartAfterBuild));
   reg('realtimeTex.buildFromSource', () => buildFromSource(ctx, restartAfterBuild));
   reg('realtimeTex.updateRtex', () => updateRtex(ctx, restartAfterBuild));
+  reg('realtimeTex.checkExtensionUpdate', () => checkForExtensionUpdate(ctx, true));
   reg('realtimeTex.selectServerPath', async () => {
     if ((await selectServerPath()) && session) await session.restart();
   });
@@ -103,6 +105,7 @@ export function activate(context: vscode.ExtensionContext): Api {
   const updateTimer = setTimeout(() => {
     void pruneReleases(ctx); // releases an engine still ran on when they were replaced
     void checkForRtexUpdate(ctx, restartAfterBuild);
+    void checkForExtensionUpdate(ctx);
   }, 15000);
   context.subscriptions.push({ dispose: () => clearTimeout(updateTimer) });
   return { session: () => session, panel: () => panel };
