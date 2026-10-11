@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Self-update: installing the downloaded `.vsix` failed with "No Servers" (it was passed to VS Code
+  under the `vscode-userdata:` scheme of the extension's storage; the installer takes `file:` URIs).
 - The engine comes from the fork by default: **Install rtex** downloads the releases of
   [kenny-21342/realtime-tex](https://github.com/kenny-21342/realtime-tex/releases) (upstream's lack
   the fork's work), and **Build from Source** builds its `kenny/main` (its `main` mirrors upstream)
