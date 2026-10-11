@@ -1,7 +1,7 @@
 // Native drawing of TikZ/pgf pages (realtime-tex docs/DISPLAY_LIST.md, "Native drawing"): which
 // pages can be drawn without the PDF, and where each drawing operation goes among the items.
 // Pure module (no DOM), unit-tested with node:test.
-import type { DisplayList, GfxColor, GfxOp, Matrix, NativePage, PatternCell } from '../src/protocol';
+import type { DisplayList, GfxColor, GfxOp, MaskCell, Matrix, NativePage, PatternCell } from '../src/protocol';
 
 /** Flags native drawing resolves (rtex_dl::gfx::RESOLVED_FLAGS). */
 const RESOLVED = new Set(['literal', 'shading']);
@@ -20,13 +20,15 @@ export interface RowNative {
   transforms: Map<number, Matrix>;
   /** the page's tiling pattern cells, by name */
   patterns: Record<string, PatternCell>;
+  /** the page's soft masks, by instance */
+  masks: Record<string, MaskCell>;
 }
 
 export function indexNative(n: NativePage): Map<number | null, RowNative> {
   const rows = new Map<number | null, RowNative>();
   const row = (line: number | null) => {
     let r = rows.get(line);
-    if (!r) rows.set(line, (r = { after: new Map(), transforms: new Map(), patterns: n.patterns ?? {} }));
+    if (!r) rows.set(line, (r = { after: new Map(), transforms: new Map(), patterns: n.patterns ?? {}, masks: n.masks ?? {} }));
     return r;
   };
   for (const op of n.ops) {
@@ -122,4 +124,13 @@ export function wrapOffsets(cell: Pick<PatternCell, 'bbox' | 'xstep' | 'ystep'>)
   };
   const xs = range(x0, x1, cell.xstep), ys = range(y0, y1, cell.ystep);
   return xs.flatMap((x) => ys.map((y) => [x, y] as [number, number]));
+}
+
+/** Luminosity (PDF's gray conversion) of RGBA pixels as their alpha, in place: a soft mask. */
+export function luminosityToAlpha(px: Uint8ClampedArray): void {
+  for (let i = 0; i < px.length; i += 4) {
+    const y = 0.3 * px[i] + 0.59 * px[i + 1] + 0.11 * px[i + 2];
+    px[i] = px[i + 1] = px[i + 2] = 0;
+    px[i + 3] = Math.round(y);
+  }
 }

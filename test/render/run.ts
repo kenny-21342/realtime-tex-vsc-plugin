@@ -3,6 +3,8 @@
 //
 //   node out/render/run.js OUT_DIR DPI GFX.jsonl
 //
+// RTEX_RENDER_PROJECT: the project directory; bitmap images (PNG, JPEG) the pages name in
+// `images_info` are loaded from it (otherwise images are drawn as placeholders).
 // GFX.jsonl: realtime-tex's `gfx_dump` example output for the page lists (one line per page
 // file: {"file", "ok", "page": NativePage}). Fonts are loaded the way the extension loads them
 // (src/resources.ts: font files by name, Type1 through pdftex.map), so kpsewhich must be on PATH.
@@ -36,6 +38,19 @@ async function main() {
       return [k, r.kind === 'sfnt' ? { kind: 'sfnt', b64: Buffer.from(r.data).toString('base64') } : r];
     });
     await page.evaluate((w: unknown) => (window as unknown as { addFonts: (w: unknown) => void }).addFonts(w), wire);
+    const project = process.env.RTEX_RENDER_PROJECT;
+    const pics: [string, string, string][] = [];
+    for (const info of Object.values(dl.images_info ?? {})) {
+      const mime = /\.png$/i.test(info.file) ? 'image/png' : /\.jpe?g$/i.test(info.file) ? 'image/jpeg' : undefined;
+      if (!project || !mime || have.has(`image:${info.file}`)) continue;
+      try {
+        pics.push([info.file, mime, readFileSync(path.resolve(project, info.file)).toString('base64')]);
+        have.add(`image:${info.file}`);
+      } catch {
+        // not in the project (a TeX Live image): drawn as a placeholder
+      }
+    }
+    await page.evaluate((l: unknown) => (window as unknown as { addImages: (l: unknown) => Promise<void> }).addImages(l), pics);
     const r = await page.evaluate(
       ([d, n, x]: [DisplayList, unknown, number]) => (window as unknown as { renderPage: (...a: unknown[]) => { png: string; native: boolean; reason: string | null } }).renderPage(d, n, x),
       [dl, e.ok ? e.page : undefined, dpi] as const,

@@ -9,6 +9,8 @@
 - Tiling patterns (TikZ `patterns` / `patterns.meta`) on native pages are drawn too: each cell is
   rendered once per period at the page's resolution and repeated through the pattern's matrix,
   so tiles stay anchored to the page as in the PDF (realtime-tex docs/display-list.md).
+- TikZ fadings (soft masks) on native pages: each masked fill or shading is drawn on a layer and
+  kept where the mask's luminosity says, as in the PDF.
 - Cached TikZ pictures on native pages are found through the page's `pictures` spots and matched by
   cache key (`file:line`), so they stay in place while you edit around them.
 - `realtimeTex.engine.repository` and `realtimeTex.engine.branch`: build the managed engine from a

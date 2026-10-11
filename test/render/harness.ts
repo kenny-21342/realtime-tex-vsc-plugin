@@ -18,6 +18,18 @@ function bytes(b64: string): Uint8Array {
   return out;
 }
 
+/** Bitmap images (file name as `images_info` gives it, mime type, bytes): resolves once all are
+ * decoded, so the page that draws them can be rendered right after. */
+(window as unknown as Record<string, unknown>).addImages = (list: [string, string, string][]) =>
+  new Promise<void>((resolve) => {
+    let left = list.length;
+    if (left === 0) return resolve();
+    images.onLoaded = () => {
+      if (--left === 0) resolve();
+    };
+    for (const [file, mime, b64] of list) images.add(file, { kind: 'bitmap', mime, data: bytes(b64) });
+  });
+
 (window as unknown as Record<string, unknown>).addFonts = (list: [string, Wire][]) => {
   for (const [key, r] of list) fonts.add(key, r.kind === 'sfnt' ? { kind: 'sfnt', data: bytes(r.b64) } : r);
 };

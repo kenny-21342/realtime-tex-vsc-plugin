@@ -161,6 +161,8 @@ export type GfxOp =
       stroke: GfxStroke | null;
       /** the fill is this tiling pattern (`NativePage.patterns`) */
       pattern?: string;
+      /** painted under this soft mask (`NativePage.masks`) */
+      mask?: string;
     }
   | {
       op: 'Shade';
@@ -175,6 +177,8 @@ export type GfxOp =
       /** [offset 0..1, color] */
       stops: [number, GfxColor][];
       alpha: number;
+      /** painted under this soft mask (`NativePage.masks`) */
+      mask?: string;
     };
 
 export interface NativePage {
@@ -184,6 +188,17 @@ export interface NativePage {
   transforms: [ItemRef, Matrix][];
   /** Tiling patterns (pgf's patterns library) the Paint ops fill with, by name. */
   patterns?: Record<string, PatternCell>;
+  /** Soft masks (pgf's fadings) ops are painted under, by instance. */
+  masks?: Record<string, MaskCell>;
+}
+
+/** A soft mask: what its form draws (`ops`, page coordinates), and the form's box `bbox` (form
+ * space) with `ctm` from form space to sp. Ops under it get, as opacity, the luminosity of this
+ * drawing over black (black, so transparent, outside the box). */
+export interface MaskCell {
+  ops: GfxOp[];
+  bbox: [number, number, number, number];
+  ctm: Matrix;
 }
 
 /** A tiling pattern's cell: `ops` (their ctm maps to pattern space) drawn clipped to `bbox` at
