@@ -150,3 +150,16 @@ test('a natively drawn page names its pictures by key; live items carry the key'
   // only spots inside the unit's own lines count, and a different key never pairs
   assert.deepEqual(cachedPictureMoves(page, rows, new Set([0])), []);
 });
+
+test('a held unit is outlined where it shows: its live rows, else its layout rows', () => {
+  const m = setup();
+  assert.equal(m.shows(5), true);
+  assert.equal(m.shows(99), false);
+  // layout rows of unit 5 on page 1: baselines 112 and 124 (height 7, depth 2)
+  assert.deepEqual(m.unitBox(1, 5), { x: 10 * U, y: 105 * U, w: 100 * U, h: 21 * U });
+  assert.deepEqual([...m.unitPages(5)].sort(), [1, 2]);
+  assert.equal(m.unitBox(1, 99), undefined);
+  // with a live result the box follows its rows
+  m.applyParagraph(6, dl([line(0, 7)], 'paragraph'), [frag(1, [30], [140])], 3);
+  assert.deepEqual(m.unitBox(1, 6), { x: 30 * U, y: 133 * U, w: 100 * U, h: 9 * U });
+});

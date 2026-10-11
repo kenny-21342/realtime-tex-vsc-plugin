@@ -18,6 +18,8 @@ export interface SessionStatus {
   errorCount: number;
   pagesTotal: number;
   mainName?: string;
+  /** Units shown in their last good version while their source has errors. */
+  held?: number;
 }
 
 export interface StatusText {
@@ -82,10 +84,13 @@ export function describe(s: SessionStatus): StatusText {
     return { text: 'Compile failed', kind: 'error', tooltip: 'The last full compile produced no pages. Click to see the problems.' };
   }
   if (s.errorCount > 0) {
+    const held = s.held
+      ? ` ${s.held === 1 ? 'The part you are editing is' : `${s.held} parts you are editing are`} shown in the last good version (outlined) until the errors are fixed.`
+      : ' The preview shows the best output so far.';
     return {
       text: `${s.errorCount} error${s.errorCount === 1 ? '' : 's'}`,
       kind: 'error',
-      tooltip: 'LaTeX reported errors. The preview shows the best output so far. Click to open the Problems panel.',
+      tooltip: `LaTeX reported errors.${held} Click to open the Problems panel.`,
     };
   }
   if (s.pending || conv?.state === 'Stale' || conv?.state === 'Converging') {

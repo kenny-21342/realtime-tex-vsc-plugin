@@ -136,6 +136,7 @@ export class PreviewPanel implements vscode.Disposable {
         const placements = [...s.model.placements].map(([par_id, fragments]) => ({ par_id, fragments, lines: 0, kind: '' }));
         this.post({ type: 'layout', pages, pagesTotal: s.model.pagesTotal, placements, keepFromRevision: null, pdf });
         for (const o of overlays) this.post({ type: 'paragraph', parId: o.parId, dl: o.dl, fragments: o.fragments, revision: o.revision });
+        this.post({ type: 'held', units: s.heldUnits });
       });
     }
   }
@@ -163,6 +164,10 @@ export class PreviewPanel implements vscode.Disposable {
       }
       case 'dropOverlays':
         this.enqueue(async () => this.post({ type: 'dropOverlays', parIds: o.parIds }));
+        break;
+      case 'held':
+        // after the layout or paragraph it belongs to (they go through the same queue)
+        this.enqueue(async () => this.post({ type: 'held', units: o.units }));
         break;
       case 'reveal':
         this.post({ type: 'reveal', page: o.target.page, x: o.target.x, y: o.target.y, force: o.force });

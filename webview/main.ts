@@ -357,6 +357,7 @@ async function renderPage(n: number): Promise<void> {
     painters[i].draw(overlay.dl, overlay.dl.other ?? []);
     for (const r of rows) painters[i].draw(overlay.dl, r.line.items, r.dx, r.dy);
   });
+  drawHeldOutlines(ctx, base, n, dpr);
   if (renderToken.get(n) !== token) return;
   const old = el.querySelector('canvas')!;
   canvas.style.width = el.style.width;
@@ -377,6 +378,41 @@ async function renderPage(n: number): Promise<void> {
 }
 
 const PT = 65536;
+
+/** Units shown in their last good version while their source has errors (host's `held`). */
+let heldUnits: { parId: number; line?: number }[] = [];
+
+/** A dashed outline and a small label around each held unit on page `n`: the part is shown in
+ * its last good version until its errors are fixed. */
+function drawHeldOutlines(ctx: CanvasRenderingContext2D, base: Mat, n: number, dpr: number): void {
+  for (const u of heldUnits) {
+    const box = model.unitBox(n, u.parId);
+    if (!box) continue;
+    const pad = 2 * PT;
+    const [x, y, w, h] = deviceRect(base, { x: box.x - pad, y: box.y - pad, w: box.w + 2 * pad, h: box.h + 2 * pad });
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.strokeStyle = HELD_COLOR;
+    ctx.lineWidth = Math.max(1, dpr);
+    ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+    ctx.setLineDash([]);
+    const label = `editing${u.line ? ` (line ${u.line})` : ''}: last good version shown`;
+    ctx.font = `${10 * dpr}px sans-serif`;
+    const tw = ctx.measureText(label).width + 6 * dpr;
+    const th = 14 * dpr;
+    // inside the outline's top-left corner: above it would cover the text before the picture
+    ctx.fillStyle = HELD_COLOR;
+    ctx.fillRect(x + 1, y + 1, tw, th);
+    ctx.fillStyle = '#fff';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, x + 1 + 3 * dpr, y + 1 + th / 2);
+    ctx.restore();
+  }
+}
+
+/** Amber, readable on the white page in light and dark themes. */
+const HELD_COLOR = '#b45309';
 
 /** Device-pixel rectangle of an sp rectangle under the page's base matrix (a scale and a quarter
  * turn: the corners' bounding box). */
@@ -696,6 +732,14 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
     case 'dropOverlays':
       markDirty(model.dropOverlays(m.parIds));
       break;
+    case 'held': {
+      const pages = new Set<number>();
+      for (const u of heldUnits) for (const p of model.unitPages(u.parId)) pages.add(p);
+      heldUnits = m.units;
+      for (const u of heldUnits) for (const p of model.unitPages(u.parId)) pages.add(p);
+      markDirty(pages);
+      break;
+    }
     case 'reveal':
       reveal(m.page, m.x, m.y, m.force);
       break;

@@ -195,7 +195,14 @@ export function engineArgs(scope?: vscode.Uri): string[] {
   const passTimeout = Math.round(c.get<number>('engine.passTimeoutSeconds', 120));
   if (passTimeout > 0 && passTimeout !== 120) args.push('--pass-timeout-ms', String(passTimeout * 1000));
   if (!c.get<boolean>('engine.pictureCache', true)) args.push('--no-picture-cache');
+  if (!holdBrokenParts(scope)) args.push('--no-hold-broken-pictures');
   return args;
+}
+
+/** realtimeTex.engine.holdBrokenPictures: while an edit leaves a part with errors, show its last
+ * good version (rtex's held pictures, and live results with errors). */
+export function holdBrokenParts(scope?: vscode.Uri): boolean {
+  return cfg(scope).get<boolean>('engine.holdBrokenPictures', true);
 }
 
 /** The rtex debug directory when realtimeTex.debug.enabled is on (rtex reads it from

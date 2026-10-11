@@ -28,6 +28,8 @@ export type HostToWebview =
     }
   | { type: 'paragraph'; parId: number; dl: DisplayList; fragments: Fragment[]; revision: number }
   | { type: 'dropOverlays'; parIds?: number[] }
+  /** Units shown in their last good version (outlined), with the source line to name. */
+  | { type: 'held'; units: { parId: number; line?: number }[] }
   | { type: 'resources'; fonts: [string, FontResource][]; images: [string, ImageResource][] }
   | { type: 'reveal'; page: number; x: number; y: number; force: boolean }
   | { type: 'config'; follow: boolean; invert: boolean; zoom?: string }
