@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assetName, assetUrl, githubRepo, isNewer, parseVersion, releaseTarget, sha256For } from '../src/release';
+import { assetName, assetUrl, compareVersions, githubRepo, isNewer, parseVersion, releaseTarget, sha256For, vsixAsset } from '../src/release';
 
 test('each supported machine maps to its release archive', () => {
   assert.equal(assetName(releaseTarget('linux', 'x64')!), 'rtex-x86_64-unknown-linux-gnu.tar.gz');
@@ -51,4 +51,23 @@ test('releases follow a GitHub engine repository', () => {
     assetUrl('v0.0.3', releaseTarget('darwin', 'arm64')!, 'kenny-21342/realtime-tex'),
     'https://github.com/kenny-21342/realtime-tex/releases/download/v0.0.3/rtex-aarch64-apple-darwin.tar.gz',
   );
+});
+
+test('versions order like semver, main builds between releases', () => {
+  assert.ok(compareVersions('0.0.2-main.5', '0.0.1') > 0);
+  assert.ok(compareVersions('0.0.2-main.5', '0.0.2') < 0);
+  assert.ok(compareVersions('0.0.2-main.10', '0.0.2-main.9') > 0);
+  assert.equal(compareVersions('v0.1.0', '0.1.0'), 0);
+  assert.ok(compareVersions('0.1.0', '0.0.9') > 0);
+  assert.ok(compareVersions('0.0.3-main.1', '0.0.2-main.99') > 0);
+});
+
+test('the extension package is found in a release', () => {
+  const a = vsixAsset([
+    { name: 'notes.txt', browser_download_url: 'u0' },
+    { name: 'realtime-tex-0.0.2-main.7.vsix.sha256', browser_download_url: 'u2' },
+    { name: 'realtime-tex-0.0.2-main.7.vsix', browser_download_url: 'u1' },
+  ]);
+  assert.deepEqual(a, { name: 'realtime-tex-0.0.2-main.7.vsix', version: '0.0.2-main.7', url: 'u1', sha256Url: 'u2' });
+  assert.equal(vsixAsset([{ name: 'rtex-x86_64-unknown-linux-gnu.tar.gz', browser_download_url: 'x' }]), undefined);
 });

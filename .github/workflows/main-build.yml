@@ -1,0 +1,72 @@
+name: Main build
+
+# The .vsix of every push to main, published as the rolling `main-build` prerelease the extension
+# updates itself from (src/selfUpdate.ts, `realtimeTex.extensionUpdates`: "main").
+# Version: the next patch after package.json's with the run number, e.g. 0.0.2-main.17. That is
+# newer than the last release (0.0.1) and every earlier main build, and older than the next
+# release (0.0.2), so the extension's semver comparison orders them all.
+# Prereleases are not GitHub's "latest release", so the release channel is unaffected.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: main-build
+  cancel-in-progress: true
+
+jobs:
+  vsix:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Version
+        run: |
+          base="$(node -p "require('./package.json').version")"
+          next="$(node -p "const [a, b, c] = '$base'.split('.').map(Number); [a, b, c + 1].join('.')")"
+          version="$next-main.${{ github.run_number }}"
+          npm pkg set version="$version"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Package .vsix
+        run: |
+          npm run package
+          vsix="realtime-tex-$VERSION.vsix"
+          test -f "$vsix"
+          sha256sum "$vsix" > "$vsix.sha256"
+          echo "VSIX=$vsix" >> "$GITHUB_ENV"
+
+      - name: Publish as the main-build prerelease
+        run: |
+          notes="Latest build of \`main\`: $VERSION from ${GITHUB_SHA::7}. The extension installs it by itself (setting \`realtimeTex.extensionUpdates\`: \`main\`); to install by hand, download \`$VSIX\` and run **Extensions: Install from VSIX…**."
+          if gh release view main-build > /dev/null 2>&1; then
+            git push -f origin "$GITHUB_SHA:refs/tags/main-build"
+            gh release edit main-build --prerelease --title "Latest build of main ($VERSION)" --notes "$notes"
+          else
+            gh release create main-build --prerelease --target "$GITHUB_SHA" --title "Latest build of main ($VERSION)" --notes "$notes"
+          fi
+          gh release upload main-build "$VSIX" "$VSIX.sha256" --clobber
+          # only this build's files stay
+          gh release view main-build --json assets --jq '.assets[].name' | while read -r a; do
+            case "$a" in "$VSIX" | "$VSIX.sha256") ;; *) gh release delete-asset main-build "$a" --yes ;; esac
+          done

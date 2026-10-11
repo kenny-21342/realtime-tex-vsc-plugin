@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The extension updates itself from GitHub: every push to `main` is built and published as the
+  rolling `main-build` prerelease (version `<next patch>-main.<run>`), and once a day the extension
+  downloads a newer `.vsix`, checks its SHA-256, installs it and offers **Reload Window**.
+  `realtimeTex.extensionUpdates` (`main`, `releases`, `off`), `realtimeTex.extensionRepository`,
+  **Realtime TeX: Check for Extension Updates**. The extension's repository is now this fork.
 - Native TikZ drawing: pages rtex sends with a `native` drawing (pgf paths, fills, strokes, dashes,
   clips, opacity, axial/radial shadings, transformed node text) are drawn on the canvas instead of
   from the PDF. Needs an rtex with native drawing (realtime-tex docs/DISPLAY_LIST.md, "Native
