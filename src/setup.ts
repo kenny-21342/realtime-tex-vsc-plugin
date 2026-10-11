@@ -6,16 +6,15 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { activeManaged, cfg, exe, installedRelease, managedBinary, managedCheckout, platformSupported, processEnv, resolveServer, setActiveManaged, texliveInstallerDir } from './config';
 import { fetchRepoFile, installRelease, latestReleaseTag } from './prebuilt';
-import { isNewer } from './release';
+import { DEFAULT_RELEASE_REPO, defaultBranch, isNewer } from './release';
 
-const DEFAULT_REPO = 'https://github.com/HenryXiaoYang/realtime-tex';
-const DEFAULT_BRANCH = 'main';
+const DEFAULT_REPO = `https://github.com/${DEFAULT_RELEASE_REPO}`;
 
-/** Where the managed rtex comes from: `realtimeTex.engine.repository` / `.branch` (a fork, a
- * feature branch), else realtime-tex `main`. */
+/** Where the managed rtex comes from: `realtimeTex.engine.repository` / `.branch` (another fork,
+ * a feature branch), else the fork's working branch (`defaultBranch`). */
 export function engineSource(): { repo: string; branch: string } {
   const repo = cfg().get<string>('engine.repository', '').trim() || DEFAULT_REPO;
-  const branch = cfg().get<string>('engine.branch', '').trim() || DEFAULT_BRANCH;
+  const branch = cfg().get<string>('engine.branch', '').trim() || defaultBranch(repo);
   return { repo, branch };
 }
 
@@ -228,7 +227,7 @@ export async function runTask(name: string, cwd: string, script: string): Promis
   });
 }
 
-/** Clone the managed checkout, or bring it to the latest realtime-tex main. The checkout belongs
+/** Clone the managed checkout, or bring it to the latest commit of its branch. The checkout belongs
  * to the extension; local changes in it stop the update instead of being thrown away. */
 function cloneScript(dir: string): string {
   const d = sq(dir);

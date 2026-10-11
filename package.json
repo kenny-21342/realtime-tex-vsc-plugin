@@ -283,20 +283,20 @@
             "Never check; update with the command only"
           ],
           "default": "notify",
-          "markdownDescription": "Keep the rtex engine installed by the extension up to date. A downloaded rtex updates to the latest release of `realtimeTex.engine.repository` when it is a GitHub repository ([realtime-tex releases](https://github.com/HenryXiaoYang/realtime-tex/releases) by default); one built from source pulls `realtimeTex.engine.repository` and `.branch` (realtime-tex `main` by default) and rebuilds it (needs `git` and `cargo`). The engine restarts on the new rtex.\n\n[Update rtex now](command:realtimeTex.updateRtex)",
+          "markdownDescription": "Keep the rtex engine installed by the extension up to date. A downloaded rtex updates to the latest release of `realtimeTex.engine.repository` when it is a GitHub repository ([kenny-21342/realtime-tex releases](https://github.com/kenny-21342/realtime-tex/releases) by default); one built from source pulls `realtimeTex.engine.repository` and `.branch` (the fork's `kenny/main` by default) and rebuilds it (needs `git` and `cargo`). The engine restarts on the new rtex.\n\n[Update rtex now](command:realtimeTex.updateRtex)",
           "scope": "machine"
         },
         "realtimeTex.engine.repository": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Git repository the managed rtex engine comes from: built from source by **Install rtex (Build from Source)**, and, when it is on GitHub, the repository whose releases **Install rtex** downloads (**Update rtex Engine** and the daily check follow it). Leave empty for [realtime-tex](https://github.com/HenryXiaoYang/realtime-tex). Example: `https://github.com/kenny-21342/realtime-tex`."
+          "markdownDescription": "Git repository the managed rtex engine comes from: built from source by **Install rtex (Build from Source)**, and, when it is on GitHub, the repository whose releases **Install rtex** downloads (**Update rtex Engine** and the daily check follow it). Leave empty for [kenny-21342/realtime-tex](https://github.com/kenny-21342/realtime-tex), the fork with this extension's engine work. Example: `https://github.com/HenryXiaoYang/realtime-tex` (upstream)."
         },
         "realtimeTex.engine.branch": {
           "type": "string",
           "default": "",
           "scope": "machine",
-          "markdownDescription": "Branch of `realtimeTex.engine.repository` to build. Leave empty for `main`. Example: `kenny/main`."
+          "markdownDescription": "Branch of `realtimeTex.engine.repository` to build. Leave empty for the fork's `kenny/main` (its `main` mirrors upstream), or `main` for any other repository."
         },
         "realtimeTex.engine.eligibility": {
           "type": "string",
@@ -309,7 +309,7 @@
             "Typeset live only parts made of commands rtex knows to be safe"
           ],
           "default": "probe",
-          "markdownDescription": "How rtex decides which parts of the document can update live. See realtime-tex's [live editing guide](https://github.com/HenryXiaoYang/realtime-tex/blob/main/docs/live-editing.md). Changing it restarts the engine."
+          "markdownDescription": "How rtex decides which parts of the document can update live. See realtime-tex's [live editing guide](https://github.com/kenny-21342/realtime-tex/blob/kenny/main/docs/live-editing.md). Changing it restarts the engine."
         },
         "realtimeTex.engine.fastBudgetMs": {
           "type": "number",

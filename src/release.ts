@@ -1,15 +1,26 @@
 // Prebuilt rtex from realtime-tex's GitHub releases: which archive fits this machine, and the
 // version and checksum arithmetic around it. Pure module.
 
-/** realtime-tex's GitHub repository (`owner/name`): releases come from here unless
- * `realtimeTex.engine.repository` names another GitHub repository (a fork with its own releases). */
-export const DEFAULT_RELEASE_REPO = 'HenryXiaoYang/realtime-tex';
+/** The engine's GitHub repository (`owner/name`): kenny-21342's fork of realtime-tex, whose
+ * releases carry the fork's work. Releases come from here unless `realtimeTex.engine.repository`
+ * names another GitHub repository (upstream HenryXiaoYang/realtime-tex, another fork). */
+export const DEFAULT_RELEASE_REPO = 'kenny-21342/realtime-tex';
+
+/** The fork's working branch: its `main` mirrors upstream. */
+export const DEFAULT_RELEASE_BRANCH = 'kenny/main';
 
 /** `owner/name` of a GitHub repository URL (`https://github.com/o/n`, `.git` and a trailing slash
  * allowed, or `git@github.com:o/n.git`); undefined for anything else. */
 export function githubRepo(url: string): string | undefined {
   const m = /^(?:https?:\/\/(?:www\.)?github\.com\/|git@github\.com:)([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(url.trim());
   return m ? `${m[1]}/${m[2]}` : undefined;
+}
+
+/** The branch of `repo` (a URL or `owner/name`) used when `realtimeTex.engine.branch` is empty:
+ * the fork's working branch for the default repository, `main` for any other. */
+export function defaultBranch(repo: string): string {
+  const r = githubRepo(repo) ?? repo.trim();
+  return r.toLowerCase() === DEFAULT_RELEASE_REPO ? DEFAULT_RELEASE_BRANCH : 'main';
 }
 
 export function releasesApi(repo = DEFAULT_RELEASE_REPO): string {

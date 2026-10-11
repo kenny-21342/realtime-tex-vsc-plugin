@@ -17,7 +17,7 @@ references and bibliographies follow from a full compile in the background.
 
 On first use, the preview walks you through anything that is missing:
 
-- **rtex is not installed.** Click **Install rtex**. It downloads the prebuilt engine of the latest [realtime-tex release](https://github.com/HenryXiaoYang/realtime-tex/releases) for your platform (a few MB) and checks its SHA-256. Prefer to build it yourself? **Build from Source** clones realtime-tex `main` and builds it with Rust's `cargo` (a few minutes; on Windows it also needs [Git for Windows](https://git-scm.com/download/win) and the Visual Studio C++ Build Tools that [rustup](https://rustup.rs) asks for). The `realtimeTex.installFrom` setting picks which one **Install rtex** does.
+- **rtex is not installed.** Click **Install rtex**. It downloads the prebuilt engine of the latest [kenny-21342/realtime-tex release](https://github.com/kenny-21342/realtime-tex/releases) (the fork of realtime-tex this extension follows) for your platform (a few MB) and checks its SHA-256. Prefer to build it yourself? **Build from Source** clones the fork's `kenny/main` and builds it with Rust's `cargo` (a few minutes; on Windows it also needs [Git for Windows](https://git-scm.com/download/win) and the Visual Studio C++ Build Tools that [rustup](https://rustup.rs) asks for). The `realtimeTex.installFrom` setting picks which one **Install rtex** does.
 - **LuaLaTeX was not found.** Choose your TeX Live `bin` folder, or let the extension install a minimal TeX Live 2026.
 
 **Realtime TeX: Check Setup** in the command palette checks everything and offers a fix for each problem.
@@ -60,7 +60,7 @@ keystroke. Everything else updates with the next full compile, typically a secon
 - new page breaks.
 
 The pill says when this is happening. See rtex's
-[live editing guide](https://github.com/HenryXiaoYang/realtime-tex/blob/main/docs/live-editing.md) for details.
+[live editing guide](https://github.com/kenny-21342/realtime-tex/blob/kenny/main/docs/live-editing.md) for details.
 
 For the fastest updates, use TFM fonts (the default, `lmodern`, …) or OpenType fonts loaded with
 `Renderer=Basic`. fontspec's default node mode works, but each keystroke takes longer.
@@ -93,8 +93,8 @@ PDF, as before.
 | `realtimeTex.updateCheck` | `notify` | Once a day, check for a newer engine (a new release, or new commits on the engine's repository and branch for a source build): `notify` offers the update, `auto` updates by itself, `off` never checks. The setting has an **Update rtex now** link. |
 | `realtimeTex.extensionUpdates` | `main` | Once a day, install a newer version of this extension: `main` the latest build of `main` (every merged change), `releases` the latest tagged release, `off` never (use **Check for Extension Updates**). |
 | `realtimeTex.extensionRepository` | *(this repository)* | GitHub repository (`owner/name` or URL) the extension updates itself from. |
-| `realtimeTex.engine.repository` | *(realtime-tex)* | Git repository the engine comes from, e.g. a fork: built from source, and when it is on GitHub, the repository whose releases **Install rtex** downloads. |
-| `realtimeTex.engine.branch` | `main` | Branch of that repository for source builds. Changing either and running **Update rtex Engine** switches the managed checkout. |
+| `realtimeTex.engine.repository` | *(kenny-21342/realtime-tex)* | Git repository the engine comes from, e.g. upstream HenryXiaoYang/realtime-tex or another fork: built from source, and when it is on GitHub, the repository whose releases **Install rtex** downloads. |
+| `realtimeTex.engine.branch` | `kenny/main` | Branch of that repository for source builds (empty: `kenny/main` for the default repository, `main` for any other). Changing either and running **Update rtex Engine** switches the managed checkout. |
 | `realtimeTex.engine.eligibility` | `probe` | How rtex picks the parts that update live: `probe` (compare a live result with the last full compile) or `allowlist` (only known-safe commands). |
 | `realtimeTex.engine.fastBudgetMs` | `50` | Time budget for re-typesetting one part live; a part that takes longer three times in a row waits for the full compile. |
 | `realtimeTex.engine.fastBudgetFactor` | `4` | The budget follows the document: a part is only too slow when it also takes longer than this many times the document's typical live update (`0`: the fixed budget alone). |

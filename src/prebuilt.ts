@@ -6,14 +6,14 @@ import * as https from 'https';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { installedRelease, releaseBinary, releasesDir, setActiveManaged } from './config';
-import { assetName, assetUrl, DEFAULT_RELEASE_REPO, githubRepo, releasesApi, releaseTarget, sha256For } from './release';
+import { assetName, assetUrl, DEFAULT_RELEASE_REPO, defaultBranch, githubRepo, releasesApi, releaseTarget, sha256For } from './release';
 
 /** The GitHub repository releases and helper files come from: the one
- * `realtimeTex.engine.repository` names when it is on GitHub, else realtime-tex's. */
+ * `realtimeTex.engine.repository` names when it is on GitHub, else the default (the fork). */
 function releaseRepo(): { repo: string; branch: string } {
   const c = vscode.workspace.getConfiguration('realtimeTex');
   const repo = githubRepo(c.get<string>('engine.repository', '')) ?? DEFAULT_RELEASE_REPO;
-  const branch = (repo !== DEFAULT_RELEASE_REPO && c.get<string>('engine.branch', '').trim()) || 'main';
+  const branch = (repo !== DEFAULT_RELEASE_REPO && c.get<string>('engine.branch', '').trim()) || defaultBranch(repo);
   return { repo, branch };
 }
 
