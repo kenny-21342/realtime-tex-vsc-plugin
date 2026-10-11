@@ -4,6 +4,7 @@ import { SP_PER_BP } from '../src/protocol';
 import { cachedPictureMoves, PreviewModel, Rect } from './model';
 import { initPdfWorker, openPdf, PdfDoc, rasterizePdfImage, renderPdfPage } from './pdf';
 import { indexNative, nativeOf } from './native';
+import { drawOverlay } from './overlay';
 import { FontStore, ImageStore, inexactReason, Mat, mul, Painter } from './render';
 import { displaySize, rotationOf, turn, unturn } from './rotate';
 
@@ -353,10 +354,7 @@ async function renderPage(n: number): Promise<void> {
   const painters = overlays.map(() => new Painter(ctx, base, fonts, images));
   overlays.forEach(({ rows }, i) => painters[i].clearRects(rowBands(rows), '#fff'));
   for (const { img, dst } of pictureSnaps) putRect(ctx, base, img, dst);
-  overlays.forEach(({ overlay, rows }, i) => {
-    painters[i].draw(overlay.dl, overlay.dl.other ?? []);
-    for (const r of rows) painters[i].draw(overlay.dl, r.line.items, r.dx, r.dy);
-  });
+  for (const overlay of overlays) drawOverlay(ctx, base, fonts, images, overlay);
   drawHeldOutlines(ctx, base, n, dpr);
   if (renderToken.get(n) !== token) return;
   const old = el.querySelector('canvas')!;
@@ -727,7 +725,7 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
       break;
     }
     case 'paragraph':
-      markDirty(model.applyParagraph(m.parId, m.dl, m.fragments, m.revision));
+      markDirty(model.applyParagraph(m.parId, m.dl, m.fragments, m.revision, m.native));
       break;
     case 'dropOverlays':
       markDirty(model.dropOverlays(m.parIds));

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { DisplayList, Fragment, Line, PageUpdate } from '../src/protocol';
-import { cachedPicture, cachedPictureMoves, PreviewModel, reanchor } from '../webview/model';
+import type { DisplayList, Fragment, Line, NativePage, PageUpdate } from '../src/protocol';
+import { cachedPicture, cachedPictureMoves, needsNativeDrawing, PreviewModel, reanchor } from '../webview/model';
 import { hitTest, spanAt, targetInFragments } from '../src/sourceMap';
 
 // coordinates in points, stored in sp
@@ -42,6 +42,7 @@ test('a fast update hides the unit rows and places its own rows', () => {
   assert.deepEqual([...m.hiddenLines(2)], [0]);
   const rows = m.overlaysOn(2)[0].rows;
   assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((r) => r.index), [2, 3]);
   assert.deepEqual([rows[0].dx, rows[0].dy], [10 * U, (100 - 31) * U]);
 });
 
@@ -102,13 +103,13 @@ test('cached pictures in a live unit move with their row, taken only from the un
   ]);
   // live unit: its picture (with a different index, as a separate LuaTeX run gives it), row moved 12 pt down
   const unitLine = line(0, 30, { items: [['u', 'cached_picture', `1 0 0 ${80 * U} ${30 * U}`]] });
-  const rows = [{ line: unitLine, dx: 10 * U, dy: 62 * U }];
+  const rows = [{ index: 0, line: unitLine, dx: 10 * U, dy: 62 * U }];
   const moves = cachedPictureMoves(page, rows, new Set([0]));
   assert.deepEqual(moves, [{ src: { x: 10 * U, y: 50 * U, w: 80 * U, h: 30 * U }, dst: { x: 10 * U, y: 62 * U, w: 80 * U, h: 30 * U } }]);
   // the other unit's picture is never a candidate
   assert.deepEqual(cachedPictureMoves(page, rows, new Set([])), []);
   // two pictures of the same size in one unit pair one to one
-  const two = [rows[0], { line: unitLine, dx: 10 * U, dy: 300 * U }];
+  const two = [rows[0], { index: 0, line: unitLine, dx: 10 * U, dy: 300 * U }];
   assert.equal(cachedPictureMoves(page, two, new Set([0])).length, 1);
 });
 
@@ -143,7 +144,7 @@ test('a natively drawn page names its pictures by key; live items carry the key'
     ],
   };
   const unitLine = line(0, 30, { items: [['u', 'cached_picture', `1 0 0 ${80 * U} ${30 * U} main.tex:9`]] });
-  const rows = [{ line: unitLine, dx: 10 * U, dy: 310 * U }];
+  const rows = [{ index: 0, line: unitLine, dx: 10 * U, dy: 310 * U }];
   assert.deepEqual(cachedPictureMoves(page, rows, new Set([0, 1])), [
     { src: { x: 10 * U, y: 300 * U, w: 80 * U, h: 30 * U }, dst: { x: 10 * U, y: 310 * U, w: 80 * U, h: 30 * U } },
   ]);
@@ -162,4 +163,34 @@ test('a held unit is outlined where it shows: its live rows, else its layout row
   // with a live result the box follows its rows
   m.applyParagraph(6, dl([line(0, 7)], 'paragraph'), [frag(1, [30], [140])], 3);
   assert.deepEqual(m.unitBox(1, 6), { x: 30 * U, y: 133 * U, w: 100 * U, h: 9 * U });
+});
+
+
+test('native drawing is retained across placement and stale reanchoring', () => {
+  const m = setup();
+  const native: NativePage = { ops: [], transforms: [] };
+  const picture = dl([line(0, 7, { items: [['l', 0, 'q Q', 0, 0]] })], 'paragraph');
+  m.applyParagraph(6, picture, [frag(1, [10], [100])], 5, native);
+  assert.equal(m.overlaysOn(1)[0].overlay.native, native);
+  m.applyLayout({ pages: [], pagesTotal: 2, placements: [{ par_id: 6, fragments: [frag(2, [20], [300])], lines: 1, kind: 'par' }], keepFromRevision: 4 });
+  const placed = m.overlaysOn(2)[0];
+  assert.equal(placed.overlay.native, native);
+  assert.equal(placed.rows[0].index, 0);
+  assert.deepEqual([placed.rows[0].dx, placed.rows[0].dy], [20 * U, 293 * U]);
+});
+
+test('unreadable or unsupported literals preserve both layout and previous overlay', () => {
+  const m = setup();
+  const picture = dl([line(0, 7, { items: [['l', 0, 'data', 0, 0]] })], 'paragraph');
+  assert.equal(needsNativeDrawing(picture), true);
+  assert.equal(m.applyParagraph(6, picture, [frag(1, [10], [100])], 2).size, 0);
+  assert.equal(m.overlays.has(6), false);
+  assert.equal(m.hiddenLines(1).has(0), false);
+  const good: NativePage = { ops: [], transforms: [] };
+  m.applyParagraph(6, picture, [frag(1, [10], [100])], 3, good);
+  const old = m.overlays.get(6);
+  m.applyParagraph(6, picture, [frag(1, [10], [100])], 4);
+  assert.equal(m.overlays.get(6), old);
+  assert.equal(m.overlays.get(6)?.revision, 3);
+  assert.equal(needsNativeDrawing({ ...dl([]), other: [['l', 0, 'data', 0, 0]] }), true);
 });

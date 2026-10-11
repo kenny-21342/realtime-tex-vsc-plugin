@@ -229,32 +229,40 @@ export class Painter {
 
   constructor(
     private readonly ctx: CanvasRenderingContext2D,
-    private readonly base: Mat,
+    private base: Mat,
     private readonly fonts: FontStore,
     private readonly images: ImageStore,
   ) {}
 
   /** Draw `items` of `dl` translated by (dx, dy) sp. `native`: the row's native drawing (page
-   * lists only, never translated): its operations run after the item they follow, and items a
-   * transformed scope moved are drawn through their transform. */
+   * or unit lists): its operations run after the item they follow, and items a
+   * transformed scope moved are drawn through their transform. The translation is applied
+   * to the base matrix, so native paths and rotated glyphs move together. */
   draw(dl: DisplayList, items: readonly Item[], dx = 0, dy = 0, native?: RowNative): void {
     const ctx = this.ctx;
     const saved = this.cur;
-    if (native) {
-      this.patterns = native.patterns;
-      this.masks = native.masks;
-    }
-    native?.after.get(-1)?.forEach((op) => this.gfx(op));
-    for (let k = 0; k < items.length; k++) {
-      const it = items[k];
-      const moved = native?.transforms.get(k);
-      if (moved) {
-        this.cur = moved;
-        this.drawItem(dl, it, dx, dy);
-        this.cur = saved;
-      } else this.drawItem(dl, it, dx, dy);
-      const ops = native?.after.get(k);
-      if (ops) for (const op of ops) this.gfx(op);
+    const base = this.base;
+    this.base = mul(base, [1, 0, 0, 1, dx, dy]);
+    dx = dy = 0;
+    try {
+      if (native) {
+        this.patterns = native.patterns;
+        this.masks = native.masks;
+      }
+      native?.after.get(-1)?.forEach((op) => this.gfx(op));
+      for (let k = 0; k < items.length; k++) {
+        const it = items[k];
+        const moved = native?.transforms.get(k);
+        if (moved) {
+          this.cur = moved;
+          this.drawItem(dl, it, dx, dy);
+          this.cur = saved;
+        } else this.drawItem(dl, it, dx, dy);
+        const ops = native?.after.get(k);
+        if (ops) for (const op of ops) this.gfx(op);
+      }
+    } finally {
+      this.base = base;
     }
   }
 

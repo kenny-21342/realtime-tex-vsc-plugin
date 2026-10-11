@@ -135,7 +135,7 @@ export class PreviewPanel implements vscode.Disposable {
         const pdf = (await this.needsPdf(s, dls, pages.some((p) => !p.exact))) ? await readPdf(s.pdfPath) : null;
         const placements = [...s.model.placements].map(([par_id, fragments]) => ({ par_id, fragments, lines: 0, kind: '' }));
         this.post({ type: 'layout', pages, pagesTotal: s.model.pagesTotal, placements, keepFromRevision: null, pdf });
-        for (const o of overlays) this.post({ type: 'paragraph', parId: o.parId, dl: o.dl, fragments: o.fragments, revision: o.revision });
+        for (const o of overlays) this.post({ type: 'paragraph', parId: o.parId, dl: o.dl, native: o.native, fragments: o.fragments, revision: o.revision });
         this.post({ type: 'held', units: s.heldUnits });
       });
     }
@@ -158,7 +158,7 @@ export class PreviewPanel implements vscode.Disposable {
         const ev = o.ev;
         this.enqueue(async () => {
           await this.sendResources(s, [ev.dl]);
-          this.post({ type: 'paragraph', parId: ev.par_id, dl: ev.dl, fragments: ev.fragments, revision: ev.versions.source_revision });
+          this.post({ type: 'paragraph', parId: ev.par_id, dl: ev.dl, native: ev.native, fragments: ev.fragments, revision: ev.versions.source_revision });
         });
         break;
       }

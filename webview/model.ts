@@ -1,16 +1,19 @@
 // Preview state: background pages plus fast-path overlays (realtime-tex docs/VERSIONING.md).
 // Pure module (no DOM), unit-tested with node:test.
-import type { DisplayList, Fragment, Item, Line, PageUpdate, Placement } from '../src/protocol';
+import type { DisplayList, Fragment, Item, Line, NativePage, PageUpdate, Placement } from '../src/protocol';
 
 export interface Overlay {
   parId: number;
   dl: DisplayList;
+  native?: NativePage;
   fragments: Fragment[];
   /** source_revision of the edit that produced it. */
   revision: number;
 }
 
 export interface OverlayRow {
+  /** Zero-based line index in the overlay display list. */
+  index: number;
   line: Line;
   dx: number;
   dy: number;
@@ -70,11 +73,12 @@ export class PreviewModel {
   }
 
   /** Install a fast-path result. Returns the pages to redraw. */
-  applyParagraph(parId: number, dl: DisplayList, fragments: Fragment[], revision: number): Set<number> {
+  applyParagraph(parId: number, dl: DisplayList, fragments: Fragment[], revision: number, native?: NativePage): Set<number> {
+    if (needsNativeDrawing(dl, native)) return new Set();
     const dirty = new Set<number>();
     const old = this.overlays.get(parId);
     if (old) for (const f of old.fragments) dirty.add(f.page);
-    this.overlays.set(parId, { parId, dl, fragments, revision });
+    this.overlays.set(parId, { parId, dl, native, fragments, revision });
     for (const f of fragments) dirty.add(f.page);
     for (const f of this.placements.get(parId) ?? []) {
       dirty.add(f.page);
@@ -196,7 +200,7 @@ export class PreviewModel {
         for (let k = 0; k < f.baselines.length; k++) {
           const line = ov.dl.lines[f.first_line - 1 + k];
           if (!line) continue;
-          rows.push({ line, dx: (f.xs[k] ?? f.x) - line.x, dy: f.baselines[k] - line.y });
+          rows.push({ index: f.first_line - 1 + k, line, dx: (f.xs[k] ?? f.x) - line.x, dy: f.baselines[k] - line.y });
         }
       }
       if (rows.length) out.push({ overlay: ov, rows });
@@ -324,4 +328,9 @@ export function cachedPictureMoves(page: DisplayList, rows: readonly OverlayRow[
     }
   }
   return out;
+}
+
+/** A literal without native ops must keep the previous picture until the next layout. */
+export function needsNativeDrawing(dl: DisplayList, native?: NativePage): boolean {
+  return !native && [...(dl.other ?? []), ...dl.lines.flatMap((line) => line.items)].some((it) => it[0] === 'l');
 }
