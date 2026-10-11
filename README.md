@@ -214,3 +214,8 @@ drawing.
 ## License
 
 MIT
+
+With the engine update planned for rtex v0.0.7, editing TikZ/pict2e labels keeps the axes,
+lines and rotated labels together. With an older engine or an unsupported picture, the preview
+keeps its complete previous drawing until the full compile. This fallback also applies when
+**Hold Broken Parts** is disabled.

@@ -28,6 +28,7 @@ async function main(): Promise<void> {
   );
   try {
     await runTests({
+      vscodeExecutablePath: process.env.RTEX_E2E_VSCODE,
       extensionDevelopmentPath: root,
       extensionTestsPath: path.join(root, 'out', 'e2e', 'suite.js'),
       launchArgs: [workspace, '--user-data-dir', userData, '--disable-extensions', '--disable-gpu'],

@@ -247,6 +247,8 @@ export interface ParagraphUpdateEvent {
   pagination_stale: boolean;
   context_stale: boolean;
   dl: DisplayList;
+  /** Native drawing in the unit display list frame; place with the row translation. */
+  native?: NativePage;
   diagnostics: Diagnostic[];
   timing: Timing;
 }

@@ -8,6 +8,11 @@ on:
     branches: [main]
     paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
+    inputs:
+      engine_ref:
+        description: Engine branch or commit to test (for coordinated engine/plugin changes)
+        default: kenny/main
+        required: false
 
 jobs:
   e2e:
@@ -34,7 +39,7 @@ jobs:
         with:
           # this fork's engine (native drawing, rotated pages, ...), the one its users build
           repository: kenny-21342/realtime-tex
-          ref: kenny/main
+          ref: ${{ inputs.engine_ref || 'kenny/main' }}
           path: rtex
 
       - uses: dtolnay/rust-toolchain@stable

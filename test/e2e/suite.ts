@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { ParagraphUpdateEvent } from '../../src/protocol';
 import type { Api } from '../../src/extension';
 import { activeManaged, installedRelease, releaseBinary } from '../../src/config';
 import { installRelease } from '../../src/prebuilt';
@@ -24,8 +25,12 @@ async function waitFor(what: string, cond: () => boolean, timeoutMs = 60000): Pr
 }
 
 function screenshot(name: string): Promise<void> {
-  if (!shots || !process.env.DISPLAY) return Promise.resolve();
+  if (!shots) return Promise.resolve();
   mkdirSync(shots, { recursive: true });
+  if (process.platform === 'darwin') {
+    return new Promise((resolve) => execFile('screencapture', ['-x', path.join(shots, name)], () => resolve()));
+  }
+  if (!process.env.DISPLAY) return Promise.resolve();
   return new Promise((resolve) => execFile('import', ['-window', 'root', path.join(shots, name)], () => resolve()));
 }
 
@@ -129,6 +134,41 @@ async function steps(): Promise<void> {
     await screenshot('4-pdf-fallback.png');
     step('TikZ page shown from the PDF');
   }
+
+  // A label edit must draw paths and the rotated label in the live overlay, before the page
+  // is replaced by the next full compile. The screenshot is taken immediately after it.
+  await waitFor('the picture layout to settle', () => s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
+  const pictureDoc = await vscode.workspace.openTextDocument(path.join(folder, 'intro.tex'));
+  const label = '$y = x/2$';
+  const labelAt = pictureDoc.getText().indexOf(label);
+  if (labelAt < 0) throw new Error('missing picture label');
+  const livePicture = new Promise<ParagraphUpdateEvent>((resolve, reject) => {
+    const timeout = setTimeout(() => { subscription.dispose(); reject(new Error('no native live picture update')); }, 30000);
+    const subscription = s.onOutput((o) => {
+      if (o.kind !== 'paragraph' || !o.ev.native) return;
+      clearTimeout(timeout);
+      subscription.dispose();
+      resolve(o.ev);
+    });
+  });
+  const pictureEditor = await vscode.window.showTextDocument(pictureDoc, vscode.ViewColumn.One);
+  await pictureEditor.edit((e) => e.replace(new vscode.Range(pictureDoc.positionAt(labelAt), pictureDoc.positionAt(labelAt + label.length)), '$y = x/2 + 1$'));
+  const live = await livePicture;
+  if (!live.native!.ops.some((o) => o.op === 'Paint')) throw new Error('live picture has no paints');
+  if (!live.native!.transforms.some(([, m]) => Math.abs(m[1]) > 0.1 && Math.abs(m[2]) > 0.1)) throw new Error('live label lost its rotation');
+  if (!live.dl.lines.flatMap((l) => l.items).some((i) => i[0] === 'g' && i[2] === 49)) throw new Error('new label is absent');
+  await sleep(80); // allow the queued paragraph message and one canvas frame
+  if (s.model.overlays.get(live.par_id)?.native !== live.native) throw new Error('live picture replaced before screenshot');
+  await screenshot('4d-live-picture-label.png');
+  step('live picture label retains native paths and rotation before the background page');
+  // An older engine or an unsupported literal supplies no native drawing. Exercise the
+  // session's wire-event handler: the successful previous overlay stays, without an outline.
+  const previous = s.model.overlays.get(live.par_id);
+  (s as unknown as { onEvent: (e: ParagraphUpdateEvent) => void }).onEvent({ ...live, native: undefined });
+  if (s.model.overlays.get(live.par_id) !== previous) throw new Error('unsupported live picture replaced its previous drawing');
+  if (s.heldUnits.some((u) => u.parId === live.par_id)) throw new Error('unsupported live picture was outlined as an error');
+  step('unsupported live picture kept its previous overlay without an error outline');
+  await waitFor('the edited label layout to settle', () => s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
 
   // 5b. a half-typed coordinate in the TikZ picture: the picture keeps its last good version,
   // outlined, until the coordinate is complete (rtex ≥ 0.0.6, held pictures)

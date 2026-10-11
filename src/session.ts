@@ -4,7 +4,7 @@ import { execFile } from 'child_process';
 import { existsSync, promises as fs } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { PreviewModel } from '../webview/model';
+import { needsNativeDrawing, PreviewModel } from '../webview/model';
 import { buildDirFor, debugDir, engineArgs, exportPathFor, holdBrokenParts, processEnv, resolveServer, ServerLocation } from './config';
 import { ShadowText } from './edits';
 import { LiveGutter } from './gutter';
@@ -492,6 +492,15 @@ export class Session implements vscode.Disposable {
           this.emitStatus();
           break;
         }
+        if (needsNativeDrawing(ev.dl, ev.native)) {
+          // Keep the complete previous drawing, without an error outline. Old engines and
+          // resources unavailable in the live run are replaced by the next full compile.
+          if (this.liveHeld.delete(ev.par_id)) this.emitHeld();
+          this.setDiagnostics('live', ev.diagnostics);
+          this.statusValue.lastBackgroundReason = 'the picture needs the full compile';
+          this.setPending(true);
+          break;
+        }
         if (this.liveHeld.delete(ev.par_id)) this.emitHeld();
         this.statusValue.lastFastMs = ev.timing.total_us / 1000;
         this.lastLoggedRoute = '';
@@ -502,7 +511,7 @@ export class Session implements vscode.Disposable {
           this.log.appendLine(`[edit] live: ${this.fastLog.n} update(s), ${(this.fastLog.totalMs / this.fastLog.n).toFixed(1)} ms average`);
           this.fastLog = { n: 0, totalMs: 0, at: Date.now() };
         }
-        this.model.applyParagraph(ev.par_id, ev.dl, ev.fragments, ev.versions.source_revision);
+        this.model.applyParagraph(ev.par_id, ev.dl, ev.fragments, ev.versions.source_revision, ev.native);
         this.outputEmitter.fire({ kind: 'paragraph', ev });
         this.gutter.state.observed([ev.par_id], true);
         this.gutter.refresh();

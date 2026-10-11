@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Live picture label edits draw the engine's native paths and glyph transforms at each row's
+  placement, keeping axes, lines and rotated labels. Requires the engine change planned for
+  v0.0.7. With older engines or unsupported literals, the complete previous unit stays visible
+  until the full compile, without an error outline.
+
 - While an edit leaves a TikZ picture with errors (a half-typed coordinate), the preview keeps its
   last good version, outlined and labelled "editing", until the errors are fixed, instead of losing
   the picture. rtex 0.0.6 holds the picture in full compiles (`LayoutUpdate.held`); a live result
