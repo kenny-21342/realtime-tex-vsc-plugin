@@ -1,8 +1,8 @@
 // Drawing rtex display lists (docs/DISPLAY_LIST.md, "Rendering rules") on a 2D canvas.
 import * as opentype from 'opentype.js';
 import { fontKey, FontResource, ImageResource, isNullFont } from '../src/fontKey';
-import type { DisplayList, FontDesc, GfxColor, GfxOp, ImageInfo, Item, Line, Matrix, PatternCell, Seg } from '../src/protocol';
-import { axialBand, cmykToRgb, cssColor, invert, RowNative, wrapOffsets } from './native';
+import type { DisplayList, FontDesc, GfxColor, GfxOp, ImageInfo, Item, Line, MaskCell, Matrix, PatternCell, Seg } from '../src/protocol';
+import { axialBand, cmykToRgb, cssColor, invert, luminosityToAlpha, RowNative, wrapOffsets } from './native';
 
 /** Affine map [a, b, c, d, e, f]: x' = a·x + c·y + e, y' = b·x + d·y + f. */
 export type Mat = [number, number, number, number, number, number];
@@ -223,6 +223,9 @@ export class Painter {
   /** an uncoloured pattern cell's tint: every color the cell's ops give is replaced by it */
   private tint?: number[];
   private tiles = new Map<string, HTMLCanvasElement>();
+  /** the page's soft masks (from the native drawing being drawn), and their alpha bitmaps */
+  private masks: Record<string, MaskCell> = {};
+  private maskAlpha = new Map<string, HTMLCanvasElement>();
 
   constructor(
     private readonly ctx: CanvasRenderingContext2D,
@@ -237,7 +240,10 @@ export class Painter {
   draw(dl: DisplayList, items: readonly Item[], dx = 0, dy = 0, native?: RowNative): void {
     const ctx = this.ctx;
     const saved = this.cur;
-    if (native) this.patterns = native.patterns;
+    if (native) {
+      this.patterns = native.patterns;
+      this.masks = native.masks;
+    }
     native?.after.get(-1)?.forEach((op) => this.gfx(op));
     for (let k = 0; k < items.length; k++) {
       const it = items[k];
@@ -262,6 +268,10 @@ export class Painter {
     }
     if (op.op === 'Restore') {
       ctx.restore();
+      return;
+    }
+    if (op.op !== 'Clip' && op.mask !== undefined && this.masks[op.mask]) {
+      this.masked(op, op.mask, this.masks[op.mask]);
       return;
     }
     const m = mul(this.base, op.ctm);
@@ -337,6 +347,57 @@ export class Painter {
     ctx.fillStyle = g;
     ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
     ctx.restore();
+  }
+
+  /** An op under a soft mask: drawn alone on a layer, kept where the mask's luminosity says (its
+   * alpha), and the layer drawn onto the page under the current clip. */
+  private masked(op: Exclude<GfxOp, { op: 'Save' | 'Restore' | 'Clip' }>, name: string, cell: MaskCell): void {
+    const { width, height } = this.ctx.canvas;
+    const layer = document.createElement('canvas');
+    layer.width = width;
+    layer.height = height;
+    const lctx = layer.getContext('2d');
+    const alpha = this.maskBitmap(name, cell, width, height);
+    if (!lctx || !alpha) return;
+    const sub = new Painter(lctx, this.base, this.fonts, this.images);
+    sub.patterns = this.patterns;
+    sub.gfx({ ...op, mask: undefined });
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
+    lctx.globalCompositeOperation = 'destination-in';
+    lctx.drawImage(alpha, 0, 0);
+    this.ctx.save();
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.ctx.drawImage(layer, 0, 0);
+    this.ctx.restore();
+  }
+
+  /** A soft mask's opacity over the whole canvas: its drawing over black inside its box (black
+   * outside), luminosity to alpha. */
+  private maskBitmap(name: string, cell: MaskCell, width: number, height: number): HTMLCanvasElement | undefined {
+    let c = this.maskAlpha.get(name);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = width;
+    c.height = height;
+    const mctx = c.getContext('2d', { willReadFrequently: true });
+    if (!mctx) return undefined;
+    mctx.fillStyle = '#000';
+    mctx.fillRect(0, 0, width, height);
+    const m = mul(this.base, cell.ctm as Mat);
+    mctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    const [x0, y0, x1, y1] = cell.bbox;
+    const box = new Path2D();
+    box.rect(x0, y0, x1 - x0, y1 - y0);
+    mctx.clip(box);
+    const sub = new Painter(mctx, this.base, this.fonts, this.images);
+    sub.patterns = this.patterns;
+    for (const op of cell.ops) sub.gfx(op);
+    mctx.setTransform(1, 0, 0, 1, 0, 0);
+    const img = mctx.getImageData(0, 0, width, height);
+    luminosityToAlpha(img.data);
+    mctx.putImageData(img, 0, 0);
+    this.maskAlpha.set(name, c);
+    return c;
   }
 
   private tinted(c: GfxColor): GfxColor {

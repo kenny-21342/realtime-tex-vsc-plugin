@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { DisplayList, Matrix, NativePage } from '../src/protocol';
-import { axialBand, cssColor, indexNative, invert, nativeOf, wrapOffsets } from '../webview/native';
+import { axialBand, cssColor, indexNative, invert, luminosityToAlpha, nativeOf, wrapOffsets } from '../webview/native';
 
 const dl = (flags: unknown): DisplayList => ({ kind: 'page', fonts: {}, lines: [], other: [], flags, width: 0, height: 0, depth: 0 });
 const native: NativePage = {
@@ -65,4 +65,11 @@ test('a pattern cell wraps where its bbox passes a step', () => {
   assert.equal(offs.length, 9);
   // a cell inside its period needs only itself
   assert.deepEqual(wrapOffsets({ bbox: [0, 0, 2, 2], xstep: 3, ystep: 3 }), [[0, 0]]);
+});
+
+test('a soft mask keeps luminosity as alpha', () => {
+  const px = new Uint8ClampedArray([255, 255, 255, 255, 0, 0, 0, 255, 255, 0, 0, 255]);
+  luminosityToAlpha(px);
+  assert.deepEqual([px[3], px[7], px[11]], [255, 0, 77]);
+  assert.deepEqual([px[0], px[1], px[2]], [0, 0, 0]);
 });
