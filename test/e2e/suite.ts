@@ -172,6 +172,10 @@ async function steps(): Promise<void> {
   if (s.model.overlays.get(live.par_id) !== previous) throw new Error('unsupported live picture replaced its previous drawing');
   if (s.heldUnits.some((u) => u.parId === live.par_id)) throw new Error('unsupported live picture was outlined as an error');
   step('unsupported live picture kept its previous overlay without an error outline');
+  // The unsupported event above is injected by this test, not produced by the engine. A
+  // faster engine may already have finished the real label edit while the screenshot ran.
+  // Request the replacement explicitly rather than depending on a pending background pass.
+  s.recompile();
   await waitFor('the edited label layout to settle', () => s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
 
   // 5b. a half-typed coordinate in the TikZ picture: the picture keeps its last good version,
