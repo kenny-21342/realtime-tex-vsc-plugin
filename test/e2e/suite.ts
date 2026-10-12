@@ -195,10 +195,25 @@ async function steps(): Promise<void> {
     const full = '(4.5,1.5)';
     const at = intro.getText().indexOf(full);
     if (at < 0) throw new Error('the picture coordinate is not in intro.tex');
-    const pageBefore = s.model.pages.get(2);
+    let pageBefore = s.model.pages.get(2);
+    let heldLayoutSeen = false;
+    let heldPageChanged = false;
+    const heldLayouts = s.onOutput((o) => {
+      if (o.kind !== 'layout') return;
+      const page = s.model.pages.get(2);
+      if (o.ev.held?.length) {
+        heldLayoutSeen = true;
+        heldPageChanged ||= page !== pageBefore && page?.hash !== pageBefore?.hash;
+      } else if (o.ev.compile.state === 'Ok') {
+        // A valid queued snapshot may arrive after the edit. The held result must retain
+        // the latest good page, including such a snapshot, rather than an older baseline.
+        pageBefore = page;
+      }
+    });
     await ed.edit((e) => e.replace(new vscode.Range(intro.positionAt(at), intro.positionAt(at + full.length)), '(4.5,'));
-    await waitFor('the picture to be held', () => (s.status.held ?? 0) > 0, 120000);
-    if (s.model.pages.get(2) !== pageBefore && s.model.pages.get(2)?.hash !== pageBefore?.hash) throw new Error('the page with the held picture changed');
+    await waitFor('the picture to be held in a full layout', () => heldLayoutSeen && (s.status.held ?? 0) > 0, 120000);
+    heldLayouts.dispose();
+    if (heldPageChanged) throw new Error('the page with the held picture changed');
     step(`broken picture held (${s.heldUnits.map((u) => `line ${u.line ?? '?'}`).join(', ')}), its page unchanged`);
     await api.panel()!.panel.webview.postMessage({ type: 'reveal', page: 2, x: 0, y: 0, force: true });
     await sleep(2500);
