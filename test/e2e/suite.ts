@@ -295,6 +295,24 @@ async function steps(): Promise<void> {
     await waitFor('the final reflow layout', () => finalAt > 0 && !srFlow.status.pending, 120000);
     if (finalAt - previewAt < 300) throw new Error('page preview did not precede the slow suffix');
     step('reflow page displayed before the slow document suffix completed');
+    const newParagraph = new Promise<number>((resolve) => {
+      const subscription = srFlow.onOutput((o) => {
+        if (o.kind !== 'paragraph' || !o.ev.dl.lines.some((l) => l.items.some((i) => i[0] === 'g' && i[2] === 90))) return;
+        subscription.dispose(); resolve(o.ev.par_id);
+      });
+    });
+    const edFresh = await vscode.window.showTextDocument(reflowDoc,vscode.ViewColumn.One);
+    const freshAt = reflowDoc.getText().indexOf('Following text.');
+    await edFresh.edit((e) => e.insert(reflowDoc.positionAt(freshAt),'Zebra paragraph.\n\n'));
+    const freshId = await newParagraph;
+    await waitFor('the new paragraph page preview', () => srFlow.model.pagePreviews().some((p) => p.placements.some((u) => u.par_id===freshId)),120000);
+    await insertAfter(reflowDoc,'Zebra',' live');
+    await waitFor('visible live text while layout is pending', () => srFlow.status.pending && srFlow.status.liveWhilePending===true,30000);
+    if (!srFlow.model.displaysRevision(freshId,srFlow.model.overlays.get(freshId)!.revision)) throw new Error('new paragraph is not drawn');
+    await screenshot('6b-new-paragraph-live.png');
+    await waitFor('the new paragraph layout to settle', () => srFlow.status.convergence?.state==='Converged' && !srFlow.status.pending,120000);
+    step('brand new paragraph and subsequent typing remain Live before layout finishes');
+
   } finally { reflowProgress.dispose(); }
   api.panel()!.panel.dispose();
   await waitFor('the reflow engine to stop', () => !srFlow.running, 10000);

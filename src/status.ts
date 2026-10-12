@@ -13,6 +13,8 @@ export interface SessionStatus {
   compile?: CompileStatus;
   /** Duration of the last fast update, ms. */
   lastFastMs?: number;
+  /** Current editor text is visible, while page layout is still catching up. */
+  liveWhilePending?: boolean;
   /** Why the last edit could not be shown instantly. */
   lastBackgroundReason?: string;
   errorCount: number;
@@ -48,6 +50,7 @@ export function explainReasons(reasons: readonly string[]): string {
     [/ParagraphBreak|boundar/i, 'paragraphs were split or merged'],
     [/inserts/i, 'footnote text is placed with the page'],
     [/NoPlacement/i, 'this part has no position from the last full compile yet'],
+    [/placement pending/i, 'the new paragraph is waiting for its page position'],
     [/no ?context|context no longer/i, 'this paragraph is new to the engine'],
     [/budget|slow|over/i, 'this paragraph takes too long to typeset live'],
     [/env/i, 'this environment is updated by the full compile'],
@@ -92,6 +95,10 @@ export function describe(s: SessionStatus): StatusText {
       kind: 'error',
       tooltip: `LaTeX reported errors.${held} Click to open the Problems panel.`,
     };
+  }
+  if (s.liveWhilePending && s.lastFastMs !== undefined && (s.pending || conv?.state === 'Stale' || conv?.state === 'Converging')) {
+    return { text: `Live · ${fmtMs(s.lastFastMs)} ms`, kind: 'live',
+      tooltip: 'Your current text is visible. Page breaks and the rest of the document layout are still updating.' };
   }
   if (s.pending || conv?.state === 'Stale' || conv?.state === 'Converging') {
     const why = s.lastBackgroundReason ? ` because ${s.lastBackgroundReason}` : '';

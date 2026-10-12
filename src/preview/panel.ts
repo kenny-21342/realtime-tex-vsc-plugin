@@ -170,6 +170,7 @@ export class PreviewPanel implements vscode.Disposable {
           if (await this.needsPdf(s, [ev.page.dl], [ev.page])) return;
           if (!s.model.applyPagePreview(ev).size) return;
           this.post({ type: 'pagePreview', ev });
+          s.refreshLiveStatus();
         });
         break;
       }

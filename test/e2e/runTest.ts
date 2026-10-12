@@ -35,7 +35,7 @@ async function main(): Promise<void> {
       extensionTestsPath: path.join(root, 'out', 'e2e', 'suite.js'),
       launchArgs: [workspace, '--user-data-dir', userData, '--disable-extensions', '--disable-gpu', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'],
       extensionTestsEnv: { RTEX_E2E_OUT: process.env.RTEX_E2E_OUT ?? path.join(work, 'shots'),
-        ...(process.env.RTEX_E2E_LARGE_PROJECT ? { RTEX_E2E_LARGE_PROJECT: workspace, RTEX_E2E_LARGE_BYTE: process.env.RTEX_E2E_LARGE_BYTE ?? '' } : {}) },
+        ...(process.env.RTEX_E2E_LARGE_PROJECT ? { RTEX_E2E_LARGE_PROJECT: workspace, RTEX_E2E_LARGE_BYTE: process.env.RTEX_E2E_LARGE_BYTE ?? '', RTEX_E2E_NEW_PARAGRAPH: process.env.RTEX_E2E_NEW_PARAGRAPH ?? '' } : {}) },
     });
   } catch (e) {
     // the extension's output channel (what rtex said) is the first thing to read on a failure

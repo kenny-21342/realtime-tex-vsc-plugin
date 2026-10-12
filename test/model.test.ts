@@ -7,7 +7,7 @@ import { hitTest, spanAt, targetInFragments } from '../src/sourceMap';
 // coordinates in points, stored in sp
 const U = 65536;
 const line = (x: number, y: number, extra: Partial<Line> = {}): Line => ({ x: x * U, y: y * U, w: 100 * U, h: 7 * U, d: 2 * U, items: [], ...extra });
-const dl = (lines: Line[], kind = 'page'): DisplayList => ({ kind, fonts: {}, lines, other: [], flags: [], width: 0, height: 0, depth: 0, page_width: 600, page_height: 800 });
+const dl = (lines: Line[], kind = 'page'): DisplayList => ({ kind, fonts: {}, lines, other: [], flags: [], width: 0, height: 0, depth: 0, page_width: 600 * U, page_height: 800 * U });
 const page = (n: number, lines: Line[]): PageUpdate => ({ page: n, exact: true, hash: n, dl: dl(lines) });
 const frag = (page: number, xs: number[], baselines: number[], first = 1): Fragment => ({
   page,
@@ -257,4 +257,39 @@ test('page previews and rollback redraw every page of a reanchored live unit', (
     placements: [{ par_id: 5, fragments: [frag(1, [10], [130])], lines: 1, kind: 'par' }] });
   assert.deepEqual([...dirty].sort(), [1, 2]);
   assert.deepEqual([...m.resetPagePreviews()].sort(), [1, 2]);
+});
+
+
+test('a new off-page paragraph becomes live on its preview and rolls back without ghost rows', () => {
+  const m = setup();
+  const box = dl([line(0, 7), line(0, 19)], 'paragraph');
+  m.applyParagraph(7, box, [], 4);
+  assert.equal(m.displaysRevision(7, 4), false);
+  m.applyPagePreview({ event: 'PagePreview', run_id: 1, base_layout_version: m.layoutVersion, source_revision: 3,
+    page: page(2, [line(10, 110), line(10, 122)]),
+    placements: [{ par_id: 7, fragments: [frag(2, [10, 10], [110, 122])], lines: 2, kind: 'par' }] });
+  assert.equal(m.displaysRevision(7, 4), true);
+  m.resetPagePreviews();
+  assert.equal(m.displaysRevision(7, 4), false);
+  assert.deepEqual(m.overlays.get(7)?.fragments, [], 'do not draw the new paragraph on a restored unrelated page');
+});
+
+test('partial new-paragraph page previews do not claim its unseen latest rows are live', () => {
+  const m=setup();
+  m.applyParagraph(7,dl([line(0,7),line(0,19),line(0,31)],'paragraph'),[],4);
+  const ev={ event:'PagePreview' as const,run_id:1,base_layout_version:m.layoutVersion,source_revision:4,
+    page:page(1,[line(10,110),line(10,122)]),placements:[{par_id:7,fragments:[frag(1,[10,10],[110,122])],lines:3,kind:'par'}] };
+  m.applyPagePreview(ev);
+  assert.equal(m.displaysRevision(7,4),false);
+  m.applyPagePreview({...ev,page:page(2,[line(10,100)]),placements:[{par_id:7,fragments:[frag(2,[10],[100],3)],lines:3,kind:'par'}]});
+  assert.equal(m.displaysRevision(7,4),true);
+  m.applyParagraph(7,dl([line(0,7),line(0,19),line(0,31),line(0,43)],'paragraph'),[],5);
+  assert.equal(m.displaysRevision(7,5),false);
+});
+
+
+test('a clipped extrapolated overlay is not reported as completely live', () => {
+  const m=setup();
+  m.applyParagraph(7,dl([line(0,7)],'paragraph'),[frag(1,[10],[900])],4);
+  assert.equal(m.displaysRevision(7,4),false);
 });

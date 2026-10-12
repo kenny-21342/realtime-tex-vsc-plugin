@@ -41,6 +41,7 @@ export class PreviewModel {
   /** Layout placements per unit. */
   readonly placements = new Map<number, Fragment[]>();
   readonly overlays = new Map<number, Overlay>();
+  private overlayBases = new WeakMap<Overlay, Fragment[]>();
   private hiddenCache = new Map<number, Set<number>>();
   layoutVersion = 0;
   private previewBase?: { pages: Map<number, PageUpdate>; placements: Map<number, Fragment[]>; total: number };
@@ -104,7 +105,7 @@ export class PreviewModel {
       for (const [id, ov] of this.overlays) {
         for (const f of ov.fragments) dirty.add(f.page);
         const fs = this.placements.get(id);
-        if (fs?.length) ov.fragments = reanchor(fs, ov.dl.lines);
+        ov.fragments = fs?.length ? reanchor(fs, ov.dl.lines) : (this.overlayBases.get(ov) ?? ov.fragments);
         for (const f of ov.fragments) dirty.add(f.page);
       }
     }
@@ -140,6 +141,7 @@ export class PreviewModel {
       }
       const placed = this.placements.get(id);
       if (placed) ov.fragments = reanchor(placed, ov.dl.lines);
+      this.overlayBases.set(ov, ov.fragments);
       for (const f of ov.fragments) dirty.add(f.page);
     }
     this.hiddenCache.clear();
@@ -150,18 +152,39 @@ export class PreviewModel {
   /** Install a fast-path result. Returns the pages to redraw. */
   applyParagraph(parId: number, dl: DisplayList, fragments: Fragment[], revision: number, native?: NativePage): Set<number> {
     if (needsNativeDrawing(dl, native)) return new Set();
+    const baseFragments = fragments;
     const placed = this.placements.get(parId);
     if (this.previewBase && placed?.length) fragments = reanchor(placed, dl.lines);
     const dirty = new Set<number>();
     const old = this.overlays.get(parId);
     if (old) for (const f of old.fragments) dirty.add(f.page);
-    this.overlays.set(parId, { parId, dl, native, fragments, revision });
+    const overlay = { parId, dl, native, fragments, revision };
+    this.overlays.set(parId, overlay);
+    this.overlayBases.set(overlay, baseFragments);
     for (const f of fragments) dirty.add(f.page);
     for (const f of this.placements.get(parId) ?? []) {
       dirty.add(f.page);
       this.hiddenCache.delete(f.page);
     }
     return dirty;
+  }
+
+  /** Whether all rows of a live result are represented by the displayed overlay/pages. */
+  displaysRevision(parId: number, revision: number): boolean {
+    const ov = this.overlays.get(parId);
+    if (!ov || ov.revision < revision || !ov.dl.lines.length || ov.dl.inserts) return false;
+    const liveRows = new Set<number>();
+    const drawable = ov.fragments.length && ov.fragments.every((f) => {
+      const h = this.pages.get(f.page)?.dl.page_height;
+      for (let i=f.first_line; i<=f.last_line; i++) liveRows.add(i);
+      return h !== undefined && f.baselines.every((b) => b>0 && b<h) && this.drawsOverlay(f.page,ov);
+    });
+    if (drawable && liveRows.size>=ov.dl.lines.length) return true;
+    const placed = this.placements.get(parId) ?? [];
+    const current = placed.filter((f) => (this.previewRevision.get(f.page) ?? -1) >= revision);
+    const rows = new Set<number>();
+    for (const f of current) for (let i=f.first_line; i<=f.last_line; i++) rows.add(i);
+    return rows.size >= ov.dl.lines.length;
   }
 
   /** Whether the preview shows something for unit `parId` (a live result, or layout rows). */
