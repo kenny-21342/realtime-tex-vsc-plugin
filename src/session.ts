@@ -16,6 +16,8 @@ import type {
   Fragment,
   HeldPicture,
   LayoutUpdateEvent,
+  PagePreviewEvent,
+  PagePreviewResetEvent,
   ParagraphUpdateEvent,
   PdfExportedEvent,
   Reply,
@@ -36,6 +38,8 @@ export interface Screen {
 
 /** What the preview needs to hear about. */
 export type SessionOutput =
+  | { kind: 'pagePreview'; ev: PagePreviewEvent }
+  | { kind: 'resetPagePreviews'; ev: PagePreviewResetEvent }
   | { kind: 'layout'; ev: LayoutUpdateEvent; keepFromRevision: number | null; pdfPath: string }
   | { kind: 'paragraph'; ev: ParagraphUpdateEvent }
   | { kind: 'dropOverlays'; parIds?: number[] }
@@ -476,6 +480,14 @@ export class Session implements vscode.Disposable {
       case 'LayoutUpdate':
         this.onLayout(ev);
         break;
+      case 'PagePreview':
+        this.setPending(true);
+        this.outputEmitter.fire({ kind: 'pagePreview', ev });
+        break;
+      case 'PagePreviewReset':
+        this.model.resetPagePreviews(ev.run_id, ev.base_layout_version);
+        this.outputEmitter.fire({ kind: 'resetPagePreviews', ev });
+        break;
       case 'ParagraphUpdate': {
         if (ev.status === 'removed') {
           // the span is gone (merged into its neighbour): hide its rows until the next layout
@@ -559,7 +571,7 @@ export class Session implements vscode.Disposable {
     this.bgDiagnosticsThisPass = false;
     this.setDiagnostics('live', []);
     const keepFromRevision = ev.convergence.state === 'Stale' ? ev.convergence.pending_since : null;
-    this.model.applyLayout({ pages: ev.pages_changed, pagesTotal: ev.pages_total, placements: ev.placements, keepFromRevision });
+    this.model.applyLayout({ pages: ev.pages_changed, pagesTotal: ev.pages_total, placements: ev.placements, keepFromRevision, layoutVersion: ev.versions.layout_version });
     // a layout replaces the live results; what it holds is its own list
     this.liveHeld.clear();
     this.layoutHeld = ev.held ?? [];
@@ -599,6 +611,8 @@ export class Session implements vscode.Disposable {
    * names the cause in its convergence reasons; otherwise LaTeX stopped with an error.
    */
   private onFailedPass(ev: LayoutUpdateEvent): void {
+    this.model.resetPagePreviews(Number.MAX_SAFE_INTEGER);
+    this.outputEmitter.fire({ kind: 'resetPagePreviews', ev: { event: 'PagePreviewReset', run_id: Number.MAX_SAFE_INTEGER, base_layout_version: this.model.layoutVersion } });
     if (!this.bgDiagnosticsThisPass) this.setDiagnostics('background', []);
     this.bgDiagnosticsThisPass = false;
     this.statusValue.compile = ev.compile;

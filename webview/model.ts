@@ -1,6 +1,6 @@
 // Preview state: background pages plus fast-path overlays (realtime-tex docs/VERSIONING.md).
 // Pure module (no DOM), unit-tested with node:test.
-import type { DisplayList, Fragment, Item, Line, NativePage, PageUpdate, Placement } from '../src/protocol';
+import type { DisplayList, Fragment, Item, Line, NativePage, PageUpdate, Placement, PagePreviewEvent } from '../src/protocol';
 
 export interface Overlay {
   parId: number;
@@ -30,6 +30,7 @@ export interface LayoutInput {
   placements: Placement[];
   /** Keep overlays with revision >= this (the layout is stale since it); null drops them all. */
   keepFromRevision: number | null;
+  layoutVersion?: number;
 }
 
 const MATCH_TOLERANCE = 64; // sp
@@ -41,6 +42,73 @@ export class PreviewModel {
   readonly placements = new Map<number, Fragment[]>();
   readonly overlays = new Map<number, Overlay>();
   private hiddenCache = new Map<number, Set<number>>();
+  layoutVersion = 0;
+  private previewBase?: { pages: Map<number, PageUpdate>; placements: Map<number, Fragment[]>; total: number };
+  private previewRevision = new Map<number, number>();
+  private previewRun = 0;
+  private discardedRun = 0;
+  private previews = new Map<number, PagePreviewEvent>();
+
+  replayLayout(): { pages: PageUpdate[]; pagesTotal: number; placements: Placement[] } {
+    const base = this.previewBase;
+    return { pages: [...(base?.pages ?? this.pages).values()], pagesTotal: base?.total ?? this.pagesTotal,
+      placements: [...(base?.placements ?? this.placements)].map(([par_id, fragments]) => ({ par_id, fragments, lines: 0, kind: '' })) };
+  }
+  pagePreviews(): PagePreviewEvent[] { return [...this.previews.values()].sort((a, b) => a.run_id - b.run_id || a.page.page - b.page.page); }
+
+  private drawsOverlay(page: number, ov: Overlay): boolean {
+    const revision = this.previewRevision.get(page);
+    if (revision === undefined) return true;
+    if (ov.revision <= revision) return false;
+    // A newer result with different pagination must not cover the following text/drawing
+    // of this rebuilt page. Keep the coherent page until the next preview catches up.
+    const rows = Math.max(0, ...(this.placements.get(ov.parId) ?? []).map((f) => f.last_line));
+    return rows === ov.dl.lines.length;
+  }
+
+  applyPagePreview(ev: PagePreviewEvent): Set<number> {
+    if (ev.base_layout_version !== this.layoutVersion || ev.run_id < this.previewRun || ev.run_id <= this.discardedRun) return new Set();
+    this.previewRun = ev.run_id;
+    this.previewBase ??= { pages: new Map(this.pages), placements: new Map(this.placements), total: this.pagesTotal };
+    const n = ev.page.page;
+    this.pages.set(n, ev.page);
+    this.pagesTotal = Math.max(this.pagesTotal, n);
+    this.previewRevision.set(n, ev.source_revision);
+    this.previews.set(n, ev);
+    for (const [id, fragments] of this.placements) this.placements.set(id, fragments.filter((f) => f.page !== n));
+    for (const p of ev.placements) {
+      const fragments = [...(this.placements.get(p.par_id) ?? []), ...p.fragments].sort((a, b) => a.page - b.page);
+      this.placements.set(p.par_id, fragments);
+    }
+    for (const [id, ov] of this.overlays) {
+      const placed = this.placements.get(id);
+      if (placed?.length) ov.fragments = reanchor(placed, ov.dl.lines);
+    }
+    this.hiddenCache.clear();
+    return new Set([n]);
+  }
+
+  resetPagePreviews(runId = this.previewRun, baseVersion = this.layoutVersion): Set<number> {
+    if (baseVersion !== this.layoutVersion || runId < this.previewRun) return new Set();
+    this.discardedRun = Math.max(this.discardedRun, runId);
+    const dirty = new Set(this.previewRevision.keys());
+    if (this.previewBase) {
+      this.pages.clear();
+      for (const [n, p] of this.previewBase.pages) this.pages.set(n, p);
+      this.placements.clear();
+      for (const [id, fs] of this.previewBase.placements) this.placements.set(id, fs);
+      this.pagesTotal = this.previewBase.total;
+      for (const [id, ov] of this.overlays) {
+        const fs = this.placements.get(id);
+        if (fs?.length) ov.fragments = reanchor(fs, ov.dl.lines);
+      }
+    }
+    this.previewBase = undefined;
+    this.previewRevision.clear();
+    this.previews.clear();
+    this.hiddenCache.clear();
+    return dirty;
+  }
 
   get hasLayout(): boolean {
     return this.pagesTotal > 0;
@@ -48,7 +116,9 @@ export class PreviewModel {
 
   /** Install a background layout. Returns the pages whose drawing changed. */
   applyLayout(input: LayoutInput): Set<number> {
-    const dirty = new Set<number>();
+    const dirty = this.resetPagePreviews();
+    this.layoutVersion = input.layoutVersion ?? this.layoutVersion + 1;
+    this.previewRun = this.discardedRun = 0;
     for (const ov of this.overlays.values()) for (const f of ov.fragments) dirty.add(f.page);
     for (const p of input.pages) {
       this.pages.set(p.page, p);
@@ -75,6 +145,8 @@ export class PreviewModel {
   /** Install a fast-path result. Returns the pages to redraw. */
   applyParagraph(parId: number, dl: DisplayList, fragments: Fragment[], revision: number, native?: NativePage): Set<number> {
     if (needsNativeDrawing(dl, native)) return new Set();
+    const placed = this.placements.get(parId);
+    if (this.previewBase && placed?.length) fragments = reanchor(placed, dl.lines);
     const dirty = new Set<number>();
     const old = this.overlays.get(parId);
     if (old) for (const f of old.fragments) dirty.add(f.page);
@@ -100,7 +172,7 @@ export class PreviewModel {
   unitBox(page: number, parId: number): { x: number; y: number; w: number; h: number } | undefined {
     const boxes: [number, number, number, number][] = [];
     const ov = this.overlays.get(parId);
-    if (ov) {
+    if (ov && this.drawsOverlay(page, ov)) {
       for (const po of this.overlaysOn(page)) {
         if (po.overlay.parId !== parId) continue;
         for (const r of po.rows) boxes.push([r.line.x + r.dx, r.line.y + r.dy - r.line.h, r.line.w, r.line.h + r.line.d]);
@@ -146,6 +218,10 @@ export class PreviewModel {
   }
 
   clear(): void {
+    this.previewBase = undefined;
+    this.previewRevision.clear();
+    this.previews.clear();
+    this.previewRun = this.discardedRun = this.layoutVersion = 0;
     this.pages.clear();
     this.placements.clear();
     this.overlays.clear();
@@ -158,7 +234,10 @@ export class PreviewModel {
     let set = this.hiddenCache.get(page);
     if (set) return set;
     set = new Set<number>();
-    for (const id of this.overlays.keys()) for (const i of this.ownLines(page, id)) set.add(i);
+    for (const [id, ov] of this.overlays) {
+      if (!this.drawsOverlay(page, ov)) continue;
+      for (const i of this.ownLines(page, id)) set.add(i);
+    }
     this.hiddenCache.set(page, set);
     return set;
   }
@@ -194,6 +273,7 @@ export class PreviewModel {
   overlaysOn(page: number): PageOverlay[] {
     const out: PageOverlay[] = [];
     for (const ov of this.overlays.values()) {
+      if (!this.drawsOverlay(page, ov)) continue;
       const rows: OverlayRow[] = [];
       for (const f of ov.fragments) {
         if (f.page !== page) continue;
@@ -211,7 +291,11 @@ export class PreviewModel {
   /** Where each unit currently is: overlay fragments win over layout placements. */
   currentPlacements(): Map<number, Fragment[]> {
     const out = new Map(this.placements);
-    for (const ov of this.overlays.values()) out.set(ov.parId, ov.fragments);
+    for (const ov of this.overlays.values()) {
+      const visible = ov.fragments.filter((f) => this.drawsOverlay(f.page, ov));
+      const covered = (this.placements.get(ov.parId) ?? []).filter((f) => !this.drawsOverlay(f.page, ov));
+      out.set(ov.parId, [...visible, ...covered].sort((a, b) => a.page - b.page));
+    }
     return out;
   }
 }

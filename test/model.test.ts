@@ -194,3 +194,53 @@ test('unreadable or unsupported literals preserve both layout and previous overl
   assert.equal(m.overlays.get(6)?.revision, 3);
   assert.equal(needsNativeDrawing({ ...dl([]), other: [['l', 0, 'data', 0, 0]] }), true);
 });
+
+test('page previews preserve newer overlays, source placements and the committed baseline', () => {
+  const m = setup();
+  const old = m.pages.get(1);
+  const oldPlacements = m.placements.get(5);
+  const fast = dl([line(0, 7), line(0, 19)], 'paragraph');
+  m.applyParagraph(5, fast, [frag(1, [10, 10], [112, 124])], 4);
+  const ev = { event: 'PagePreview' as const, run_id: 1, base_layout_version: m.layoutVersion, source_revision: 3,
+    page: page(1, [line(10, 100), line(10, 130), line(10, 142)]),
+    placements: [{ par_id: 5, fragments: [frag(1, [10, 10], [130, 142])], lines: 2, kind: 'par' }] };
+  assert.deepEqual([...m.applyPagePreview(ev)], [1]);
+  assert.equal(m.overlaysOn(1)[0].rows[0].dy, 123 * U);
+  assert.deepEqual([...m.hiddenLines(1)], [1, 2]);
+  assert.equal(m.replayLayout().pages[0], old);
+  assert.deepEqual(m.replayLayout().placements.find((p) => p.par_id === 5)?.fragments, oldPlacements);
+  m.applyPagePreview({ ...ev, source_revision: 4 });
+  assert.equal(m.overlaysOn(1).length, 0);
+  assert.equal(m.hiddenLines(1).size, 0);
+  assert.equal(m.currentPlacements().get(5)?.[0].baselines[0], 130 * U);
+  m.resetPagePreviews(1, m.layoutVersion);
+  assert.equal(m.pages.get(1), old);
+  assert.deepEqual(m.placements.get(5), oldPlacements);
+  assert.equal(m.overlays.get(5)?.revision, 4, 'rollback retains the latest live result');
+  assert.equal(m.applyPagePreview(ev).size, 0, 'a canceled async preview cannot return');
+});
+
+test('a completed layout discards previews even for pages absent from its changed-page delta', () => {
+  const m = setup();
+  const original = m.pages.get(1);
+  const base = m.layoutVersion;
+  const ev = { event: 'PagePreview' as const, run_id: 5, base_layout_version: base, source_revision: 3,
+    page: page(1, [line(10, 160)]), placements: [] };
+  m.applyPagePreview(ev);
+  const dirty = m.applyLayout({ pages: [], pagesTotal: 2, placements: [], keepFromRevision: null, layoutVersion: base + 1 });
+  assert(dirty.has(1));
+  assert.equal(m.pages.get(1), original);
+  assert.equal(m.applyPagePreview(ev).size, 0, 'late preview from an older layout is ignored');
+});
+
+test('a newer reflowing overlay cannot cover the drawing on a rebuilt page', () => {
+  const m = setup();
+  const fast = dl([line(0, 7), line(0, 19), line(0, 31), line(0, 43)], 'paragraph');
+  m.applyParagraph(5, fast, [frag(1, [10, 10, 10, 10], [112, 124, 136, 148])], 5);
+  m.applyPagePreview({ event: 'PagePreview', run_id: 1, base_layout_version: m.layoutVersion, source_revision: 4,
+    page: page(1, [line(10, 100), line(10, 112), line(10, 124)]),
+    placements: [{ par_id: 5, fragments: [frag(1, [10, 10], [112, 124])], lines: 2, kind: 'par' }] });
+  assert.equal(m.overlaysOn(1).length, 0);
+  assert.equal(m.hiddenLines(1).size, 0);
+  assert(m.overlays.has(5), 'retain the latest edit for a later preview or completed layout');
+});

@@ -38,6 +38,14 @@ let pdfPages = 0;
  * display list (Infinity: no PDF came with the layout that last changed the page). */
 let pdfSerialLoaded = 0;
 const pagePdfSerial = new Map<number, number>();
+const previewPdfSerial = new Map<number, number | undefined>();
+function restorePreviewPdfSerial(): void {
+  for (const [n, serial] of previewPdfSerial) {
+    if (serial === undefined) pagePdfSerial.delete(n);
+    else pagePdfSerial.set(n, serial);
+  }
+  previewPdfSerial.clear();
+}
 
 // ---------------------------------------------------------------------------------------------
 // DOM
@@ -691,12 +699,14 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
       for (const [file, res] of m.images) images.add(file, res);
       break;
     case 'layout': {
+      restorePreviewPdfSerial();
       const first = !model.hasLayout;
       const dirtyPages = model.applyLayout({
         pages: m.pages,
         pagesTotal: m.pagesTotal,
         placements: m.placements,
         keepFromRevision: m.keepFromRevision,
+        layoutVersion: m.layoutVersion,
       });
       for (const p of m.pages) pagePdfSerial.set(p.page, m.pdf ? pdfSerial + 1 : Infinity);
       if (m.pdf) {
@@ -724,6 +734,22 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
       updatePageNo();
       break;
     }
+    case 'pagePreview': {
+      const dirty = model.applyPagePreview(m.ev);
+      if (!dirty.size) break;
+      if (!previewPdfSerial.has(m.ev.page.page)) previewPdfSerial.set(m.ev.page.page, pagePdfSerial.get(m.ev.page.page));
+      pagePdfSerial.set(m.ev.page.page, Infinity);
+      layoutPages();
+      markDirty(dirty);
+      updatePageNo();
+      break;
+    }
+    case 'resetPagePreviews':
+      markDirty(model.resetPagePreviews(m.runId, m.baseLayoutVersion));
+      if (!model.pagePreviews().length) restorePreviewPdfSerial();
+      layoutPages();
+      updatePageNo();
+      break;
     case 'paragraph':
       markDirty(model.applyParagraph(m.parId, m.dl, m.fragments, m.revision, m.native));
       break;
@@ -757,6 +783,7 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
       pdfPages = 0;
       pdfSerialLoaded = 0;
       pagePdfSerial.clear();
+      previewPdfSerial.clear();
       banner.hidden = true;
       updatePageNo();
       break;
