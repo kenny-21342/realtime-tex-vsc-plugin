@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Newly added paragraphs keep live feedback while the engine updates pagination. The Live
+  indicator is shown only after the current edited units' rows are visible; its tooltip explains
+  that page layout is still updating. Unplaced or clipped rows keep the updating indicator.
+  Off-page live boxes re-anchor when page previews arrive, and rollback restores their original
+  placements so a new paragraph cannot leave ghost text on an unrelated restored page.
+
 ## 0.0.2 (2026-10-12)
 
 - Display complete rebuilt pages as the engine ships them, without waiting for the rest of a

@@ -26,3 +26,13 @@ test('map and encoding files', () => {
   const enc = parseEncFile('% x\n/enc [\n/grave /acute % c\n/circumflex\n] def\n');
   assert.deepEqual(enc, ['grave', 'acute', 'circumflex']);
 });
+
+
+test('visible live text stays Live while layout catches up, without claiming convergence', () => {
+  const s={ phase:'live' as const,pending:true,errorCount:0,pagesTotal:3,lastFastMs:1.2,liveWhilePending:true };
+  assert.equal(describe(s).kind,'live');
+  assert.match(describe(s).tooltip,/still updating/);
+  assert.equal(describe({...s,liveWhilePending:false}).text,'Updating layout…');
+  assert.equal(describe({...s,errorCount:1}).kind,'error');
+  assert.equal(describe({...s,compile:{state:'Failed'}}).text,'Compile failed');
+});

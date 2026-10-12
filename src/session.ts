@@ -13,6 +13,7 @@ import type { Action, ScreenKind } from './messages';
 import type {
   Diagnostic as RtexDiagnostic,
   EditResult,
+  Command,
   Fragment,
   HeldPicture,
   LayoutUpdateEvent,
@@ -196,6 +197,10 @@ export class Session implements vscode.Disposable {
     const extraArgs = engineArgs(vscode.Uri.file(this.mainFile));
     const proc = new RtexProcess({ serverPath: this.server.path, projectRoot: this.projectRoot, mainFile: this.mainRel, buildDir: this.buildDir, extraArgs, env });
     this.proc = proc;
+    this.latestEditRevision = 0;
+    this.liveRequests = 0;
+    this.latestLiveEdit = undefined;
+    this.statusValue.liveWhilePending = false;
     proc.on('event', (ev: RtexEvent) => this.onEvent(ev));
     proc.on('stderr', (line: string) => this.log.appendLine(line));
     proc.on('exit', (info: ExitInfo) => this.onExit(proc, info));
@@ -218,7 +223,7 @@ export class Session implements vscode.Disposable {
       if (!rel) continue;
       this.shadows.set(rel, new ShadowText(doc.getText()));
       // the main file is loaded from disk by rtex; other files only when they are edited
-      if (doc.isDirty || rel !== this.mainRel) proc.send({ cmd: 'set_document', path: rel, text: doc.getText() }, (r) => this.onEditReply(r));
+      if (doc.isDirty || rel !== this.mainRel) this.sendEdit(proc, { cmd: 'set_document', path: rel, text: doc.getText() });
     }
     this.diskTexts.clear();
     this.watchFiles();
@@ -316,7 +321,7 @@ export class Session implements vscode.Disposable {
     const shadow = this.shadows.get(rel);
     if (!shadow) {
       this.shadows.set(rel, new ShadowText(e.document.getText()));
-      proc.send({ cmd: 'set_document', path: rel, text: e.document.getText() }, (r) => this.onEditReply(r));
+      this.sendEdit(proc, { cmd: 'set_document', path: rel, text: e.document.getText() });
       return;
     }
     const edits = shadow.apply(e.contentChanges);
@@ -324,11 +329,11 @@ export class Session implements vscode.Disposable {
       // out of step (should not happen): resend the whole buffer
       this.log.appendLine(`[sync] ${rel}: resynchronizing`);
       shadow.reset(e.document.getText());
-      proc.send({ cmd: 'set_document', path: rel, text: shadow.text }, (r) => this.onEditReply(r));
+      this.sendEdit(proc, { cmd: 'set_document', path: rel, text: shadow.text });
       return;
     }
     for (const ed of edits) {
-      proc.send({ cmd: 'edit', path: rel, start: ed.start, end: ed.end, text: ed.text }, (r) => this.onEditReply(r));
+      this.sendEdit(proc, { cmd: 'edit', path: rel, start: ed.start, end: ed.end, text: ed.text });
     }
   }
 
@@ -338,7 +343,7 @@ export class Session implements vscode.Disposable {
     if (!rel || !this.proc || this.shadows.has(rel)) return;
     this.shadows.set(rel, new ShadowText(doc.getText()));
     // rtex loaded the main file from disk; other files only when they are sent
-    if (doc.isDirty || rel !== this.mainRel) this.proc.send({ cmd: 'set_document', path: rel, text: doc.getText() }, (r) => this.onEditReply(r));
+    if (doc.isDirty || rel !== this.mainRel) this.sendEdit(this.proc, { cmd: 'set_document', path: rel, text: doc.getText() });
   }
 
   /** A document closed without saving goes back to its text on disk. */
@@ -349,13 +354,40 @@ export class Session implements vscode.Disposable {
       const disk = await fs.readFile(doc.fileName, 'utf8');
       if (disk !== this.shadows.get(rel)!.text) {
         this.shadows.get(rel)!.reset(disk);
-        this.proc.send({ cmd: 'set_document', path: rel, text: disk }, (r) => this.onEditReply(r));
+        this.sendEdit(this.proc, { cmd: 'set_document', path: rel, text: disk });
       }
     } catch {
       /* deleted */
     }
     this.shadows.delete(rel);
     this.spansCache.delete(rel);
+  }
+
+  private latestEditRevision = 0;
+  private liveRequests = 0;
+  private latestLiveEdit?: { revision: number; ids: number[] };
+
+  private sendEdit(proc: RtexProcess, cmd: Extract<Command, { cmd: 'edit' | 'set_document' }>): void {
+    this.liveRequests++;
+    this.latestLiveEdit = undefined;
+    this.statusValue.liveWhilePending = false;
+    this.emitStatus();
+    void proc.request(cmd).then((r) => {
+      if (this.proc !== proc) return;
+      this.liveRequests--;
+      this.onEditReply(r);
+      this.refreshLiveStatus();
+    }, () => {
+      if (this.proc === proc) { this.liveRequests--; this.refreshLiveStatus(); }
+    });
+  }
+
+  /** Called after resource-ready page previews have been accepted by the host model. */
+  refreshLiveStatus(): void {
+    const edit = this.latestLiveEdit;
+    this.statusValue.liveWhilePending = this.liveRequests === 0 && !!edit?.ids.length
+      && edit.ids.every((id) => this.model.displaysRevision(id, edit.revision));
+    this.emitStatus();
   }
 
   private errorRecheck: ReturnType<typeof setTimeout> | undefined;
@@ -369,6 +401,12 @@ export class Session implements vscode.Disposable {
     }
     if (r.reply !== 'edit' && r.reply !== 'set_document') return;
     const res: EditResult = r.result;
+    if (res.source_revision >= this.latestEditRevision) {
+      this.latestEditRevision = res.source_revision;
+      this.latestLiveEdit = res.routed === 'fast'
+        ? { revision: res.source_revision, ids: [...new Set([...res.outcome.touched, ...res.outcome.added])] }
+        : undefined;
+    }
     // errors are found by full compiles, which fast edits do not start: while the Problems
     // panel lists some, recompile shortly after typing stops so fixed ones disappear
     if ((this.diags.get('background') ?? []).some((d) => d.severity === 'error')) {
@@ -412,7 +450,7 @@ export class Session implements vscode.Disposable {
           // nothing, and a set_document of the main file would restart the live engine
           if (st.mtimeMs <= this.startedAt || this.diskTexts.get(rel) === text) return;
           this.diskTexts.set(rel, text);
-          this.proc?.send({ cmd: 'set_document', path: rel, text }, (r) => this.onEditReply(r));
+          if (this.proc) this.sendEdit(this.proc, { cmd: 'set_document', path: rel, text });
         } catch {
           /* deleted */
         }
@@ -435,6 +473,8 @@ export class Session implements vscode.Disposable {
   recompile(): void {
     if (!this.proc) return;
     this.statusValue.lastBackgroundReason = undefined;
+    this.latestLiveEdit = undefined;
+    this.statusValue.liveWhilePending = false;
     this.setPending(true);
     this.proc.send({ cmd: 'request_layout' });
   }
@@ -486,6 +526,7 @@ export class Session implements vscode.Disposable {
         break;
       case 'PagePreviewReset':
         this.model.resetPagePreviews(ev.run_id, ev.base_layout_version);
+        this.refreshLiveStatus();
         this.outputEmitter.fire({ kind: 'resetPagePreviews', ev });
         break;
       case 'ParagraphUpdate': {
@@ -528,8 +569,9 @@ export class Session implements vscode.Disposable {
         this.gutter.state.observed([ev.par_id], true);
         this.gutter.refresh();
         this.setDiagnostics('live', ev.diagnostics);
+        this.refreshLiveStatus();
         if (ev.pagination_stale || ev.reasons.length) {
-          this.statusValue.lastBackgroundReason = ev.reasons.includes('inserts') ? 'footnote text is placed with the page' : 'the paragraph changed its number of lines';
+          this.statusValue.lastBackgroundReason = ev.reasons.includes('inserts') ? 'footnote text is placed with the page' : ev.reasons.includes('placement pending') ? 'the new paragraph is waiting for its page position' : 'the paragraph changed its number of lines';
           this.setPending(true);
         } else this.emitStatus();
         break;
@@ -548,6 +590,8 @@ export class Session implements vscode.Disposable {
           this.gutter.refresh();
         }
         this.statusValue.lastBackgroundReason = explainReasons(ev.reasons);
+        if (ev.par_id !== null && this.latestLiveEdit?.ids.includes(ev.par_id)) this.latestLiveEdit = undefined;
+        this.refreshLiveStatus();
         this.setPending(true);
         break;
       case 'PdfExported': {
@@ -572,6 +616,7 @@ export class Session implements vscode.Disposable {
     this.setDiagnostics('live', []);
     const keepFromRevision = ev.convergence.state === 'Stale' ? ev.convergence.pending_since : null;
     this.model.applyLayout({ pages: ev.pages_changed, pagesTotal: ev.pages_total, placements: ev.placements, keepFromRevision, layoutVersion: ev.versions.layout_version });
+    this.refreshLiveStatus();
     // a layout replaces the live results; what it holds is its own list
     this.liveHeld.clear();
     this.layoutHeld = ev.held ?? [];
@@ -834,7 +879,7 @@ export class Session implements vscode.Disposable {
     if (this.statusValue.phase === phase) return;
     if (phase === 'compiling') this.watchFirstCompile();
     this.statusValue.phase = phase;
-    if (phase !== 'live') this.statusValue.pending = false;
+    if (phase !== 'live') { this.statusValue.pending = false; this.statusValue.liveWhilePending = false; }
     this.emitStatus();
   }
 

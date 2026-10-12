@@ -30,9 +30,9 @@ export async function runLarge(screenshot: (name: string) => Promise<void>): Pro
   const initial = doc.getText();
   let character = Buffer.from(initial, 'utf8').subarray(0, byte).toString('utf8').length;
   const spans = await (s as unknown as { spans: (rel: string) => Promise<Span[]> }).spans('main.tex');
-  const span = spans.find((sp) => sp.range.start <= byte && sp.range.end >= byte);
+  let span = spans.find((sp) => sp.range.start <= byte && sp.range.end >= byte);
   if (!span) throw new Error('the requested edit has no source span');
-  const page = s.model.placements.get(span.id)?.[0]?.page;
+  const page = s.model.placements.get(span!.id)?.[0]?.page;
   if (!page) throw new Error('the edit has no page placement');
   const cursor = doc.positionAt(character);
   editor.selection = new vscode.Selection(cursor, cursor);
@@ -45,20 +45,29 @@ export async function runLarge(screenshot: (name: string) => Promise<void>): Pro
   let firstPreview: number | undefined;
   let updatesWhileTyping = 0;
   let typing = true;
+  let visibleLiveUpdates = 0;
+  const liveStatus = s.onStatus((status) => { if (typing && status.pending && status.liveWhilePending) visibleLiveUpdates++; });
   let lastRevision = 0;
   let settledRevision = 0;
   const subscription = s.onOutput((o) => {
     if (o.kind === 'paragraph') lastRevision = Math.max(lastRevision, o.ev.versions.source_revision);
     if (o.kind === 'layout' && o.ev.convergence.state === 'Converged') settledRevision = Math.max(settledRevision, o.ev.versions.source_revision);
-    if (o.kind === 'pagePreview' && o.ev.placements.some((p) => p.par_id === span.id)) {
+    if (o.kind === 'pagePreview' && o.ev.placements.some((p) => p.par_id === span!.id)) {
       firstPreview ??= performance.now() - started;
       if (typing) updatesWhileTyping++;
     }
   });
   try {
     for (let i = 0; i < 60; i++) {
-      await editor.edit((e) => e.insert(doc.positionAt(character), ' additional'));
-      character += ' additional'.length;
+      const added = process.env.RTEX_E2E_NEW_PARAGRAPH && i===0 ? '\n\nZebra new paragraph' : ' additional';
+      await editor.edit((e) => e.insert(doc.positionAt(character), added));
+      character += added.length;
+      if (process.env.RTEX_E2E_NEW_PARAGRAPH && i===0) {
+        const byteNow=Buffer.byteLength(doc.getText().slice(0,character))-1;
+        const current = await (s as unknown as { spans: (rel: string) => Promise<Span[]> }).spans('main.tex');
+        span=current.find((sp) => sp.range.start<=byteNow && sp.range.end>byteNow);
+        if (!span) throw new Error('the inserted paragraph has no span');
+      }
       await sleep(Math.max(0, started + (i + 1) * 100 - performance.now()));
     }
     typing = false;
@@ -70,9 +79,9 @@ export async function runLarge(screenshot: (name: string) => Promise<void>): Pro
     s.recompile();
     await waitFor('the final large layout', () => settledRevision >= lastRevision && s.status.convergence?.state === 'Converged' && !s.status.pending);
     await screenshot('large-settled.png');
-    const result = { pages: s.model.pagesTotal, editedPage: page, firstPreviewMs: firstPreview, previewsWhileTyping: updatesWhileTyping, sentPreviews: api.panel()!.transportStats.previews - count };
+    const result = { visibleLiveUpdates, pages: s.model.pagesTotal, editedPage: page, firstPreviewMs: firstPreview, previewsWhileTyping: updatesWhileTyping, sentPreviews: api.panel()!.transportStats.previews - count };
     console.log('[e2e-large]', JSON.stringify(result));
     const out = process.env.RTEX_E2E_OUT;
     if (out) { mkdirSync(out, { recursive: true }); writeFileSync(path.join(out, 'large-result.json'), JSON.stringify(result, null, 2)); }
-  } finally { subscription.dispose(); }
+  } finally { subscription.dispose(); liveStatus.dispose(); }
 }
