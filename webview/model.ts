@@ -71,6 +71,7 @@ export class PreviewModel {
     this.previewRun = ev.run_id;
     this.previewBase ??= { pages: new Map(this.pages), placements: new Map(this.placements), total: this.pagesTotal };
     const n = ev.page.page;
+    const dirty = new Set([n]);
     this.pages.set(n, ev.page);
     this.pagesTotal = Math.max(this.pagesTotal, n);
     this.previewRevision.set(n, ev.source_revision);
@@ -81,11 +82,13 @@ export class PreviewModel {
       this.placements.set(p.par_id, fragments);
     }
     for (const [id, ov] of this.overlays) {
+      for (const f of ov.fragments) dirty.add(f.page);
       const placed = this.placements.get(id);
       if (placed?.length) ov.fragments = reanchor(placed, ov.dl.lines);
+      for (const f of ov.fragments) dirty.add(f.page);
     }
     this.hiddenCache.clear();
-    return new Set([n]);
+    return dirty;
   }
 
   resetPagePreviews(runId = this.previewRun, baseVersion = this.layoutVersion): Set<number> {
@@ -99,8 +102,10 @@ export class PreviewModel {
       for (const [id, fs] of this.previewBase.placements) this.placements.set(id, fs);
       this.pagesTotal = this.previewBase.total;
       for (const [id, ov] of this.overlays) {
+        for (const f of ov.fragments) dirty.add(f.page);
         const fs = this.placements.get(id);
         if (fs?.length) ov.fragments = reanchor(fs, ov.dl.lines);
+        for (const f of ov.fragments) dirty.add(f.page);
       }
     }
     this.previewBase = undefined;

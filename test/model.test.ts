@@ -244,3 +244,17 @@ test('a newer reflowing overlay cannot cover the drawing on a rebuilt page', () 
   assert.equal(m.hiddenLines(1).size, 0);
   assert(m.overlays.has(5), 'retain the latest edit for a later preview or completed layout');
 });
+
+
+test('page previews and rollback redraw every page of a reanchored live unit', () => {
+  const m = setup();
+  const first = frag(1, [10], [112]);
+  const second = { ...frag(2, [10], [100]), first_line: 2, last_line: 2 };
+  m.placements.set(5, [first, second]);
+  m.applyParagraph(5, dl([line(0, 7), line(0, 19)], 'paragraph'), [first, second], 5);
+  const dirty = m.applyPagePreview({ event: 'PagePreview', run_id: 1, base_layout_version: m.layoutVersion, source_revision: 4,
+    page: page(1, [line(10, 100), line(10, 130)]),
+    placements: [{ par_id: 5, fragments: [frag(1, [10], [130])], lines: 1, kind: 'par' }] });
+  assert.deepEqual([...dirty].sort(), [1, 2]);
+  assert.deepEqual([...m.resetPagePreviews()].sort(), [1, 2]);
+});
