@@ -146,6 +146,14 @@ async function steps(): Promise<void> {
   const label = '$y = x/2$';
   const labelAt = pictureDoc.getText().indexOf(label);
   if (labelAt < 0) throw new Error('missing picture label');
+  // A completed earlier revision can arrive while the label's pass is still running.
+  // Track source revisions before editing so a fast pass cannot be missed either.
+  let pictureSettledRevision = -1;
+  const pictureLayouts = s.onOutput((o) => {
+    if (o.kind === 'layout' && o.ev.convergence.state === 'Converged') {
+      pictureSettledRevision = Math.max(pictureSettledRevision, o.ev.versions.source_revision);
+    }
+  });
   const livePicture = new Promise<ParagraphUpdateEvent>((resolve, reject) => {
     const timeout = setTimeout(() => { subscription.dispose(); reject(new Error('no native live picture update')); }, 30000);
     const subscription = s.onOutput((o) => {
@@ -176,7 +184,8 @@ async function steps(): Promise<void> {
   // faster engine may already have finished the real label edit while the screenshot ran.
   // Request the replacement explicitly rather than depending on a pending background pass.
   s.recompile();
-  await waitFor('the edited label layout to settle', () => s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
+  await waitFor('the edited label layout to settle', () => pictureSettledRevision >= live.versions.source_revision && s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
+  pictureLayouts.dispose();
 
   // 5b. a half-typed coordinate in the TikZ picture: the picture keeps its last good version,
   // outlined, until the coordinate is complete (rtex ≥ 0.0.6, held pictures)
