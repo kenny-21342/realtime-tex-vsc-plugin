@@ -13,7 +13,7 @@ async function main(): Promise<void> {
   if (!server) throw new Error('set RTEX_E2E_SERVER to the rtex binary');
   const work = mkdtempSync(path.join(os.tmpdir(), 'rtex-e2e-'));
   const workspace = path.join(work, 'project');
-  cpSync(path.join(root, 'test', 'e2e', 'fixture'), workspace, { recursive: true });
+  cpSync(process.env.RTEX_E2E_LARGE_PROJECT ?? path.join(root, 'test', 'e2e', 'fixture'), workspace, { recursive: true });
   const userData = path.join(work, 'user-data');
   mkdirSync(path.join(userData, 'User'), { recursive: true });
   writeFileSync(
@@ -21,6 +21,8 @@ async function main(): Promise<void> {
     JSON.stringify({
       'realtimeTex.serverPath': server,
       'realtimeTex.texliveBin': tlbin,
+      ...(process.env.RTEX_E2E_LARGE_BUILD ? { 'realtimeTex.buildDir': process.env.RTEX_E2E_LARGE_BUILD } : {}),
+      'realtimeTex.extensionUpdates': 'off',
       'workbench.startupEditor': 'none',
       'security.workspace.trust.enabled': false,
       'window.zoomLevel': 0,
@@ -31,8 +33,9 @@ async function main(): Promise<void> {
       vscodeExecutablePath: process.env.RTEX_E2E_VSCODE,
       extensionDevelopmentPath: root,
       extensionTestsPath: path.join(root, 'out', 'e2e', 'suite.js'),
-      launchArgs: [workspace, '--user-data-dir', userData, '--disable-extensions', '--disable-gpu'],
-      extensionTestsEnv: { RTEX_E2E_OUT: process.env.RTEX_E2E_OUT ?? path.join(work, 'shots') },
+      launchArgs: [workspace, '--user-data-dir', userData, '--disable-extensions', '--disable-gpu', '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling'],
+      extensionTestsEnv: { RTEX_E2E_OUT: process.env.RTEX_E2E_OUT ?? path.join(work, 'shots'),
+        ...(process.env.RTEX_E2E_LARGE_PROJECT ? { RTEX_E2E_LARGE_PROJECT: workspace, RTEX_E2E_LARGE_BYTE: process.env.RTEX_E2E_LARGE_BYTE ?? '' } : {}) },
     });
   } catch (e) {
     // the extension's output channel (what rtex said) is the first thing to read on a failure

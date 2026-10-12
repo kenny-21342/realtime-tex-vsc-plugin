@@ -1,6 +1,6 @@
 // Messages between the extension host and the preview webview.
 import type { FontResource, ImageResource } from './fontKey';
-import type { DisplayList, Fragment, NativePage, PageUpdate, Placement } from './protocol';
+import type { DisplayList, Fragment, NativePage, PageUpdate, Placement, PagePreviewEvent } from './protocol';
 
 export type ScreenKind = 'starting' | 'compiling' | 'error' | 'noMain' | 'notInstalled' | 'stopped' | 'unsupported';
 
@@ -23,9 +23,12 @@ export type HostToWebview =
       pagesTotal: number;
       placements: Placement[];
       keepFromRevision: number | null;
+      layoutVersion: number;
       /** The background PDF, when some page may need it. */
       pdf: Uint8Array | null;
     }
+  | { type: 'pagePreview'; ev: PagePreviewEvent }
+  | { type: 'resetPagePreviews'; runId: number; baseLayoutVersion: number }
   | { type: 'paragraph'; parId: number; dl: DisplayList; native?: NativePage; fragments: Fragment[]; revision: number }
   | { type: 'dropOverlays'; parIds?: number[] }
   /** Units shown in their last good version (outlined), with the source line to name. */

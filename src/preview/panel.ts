@@ -7,10 +7,11 @@ import * as vscode from 'vscode';
 import { cfg } from '../config';
 import { fontKey } from '../fontKey';
 import type { HostToWebview, WebviewToHost } from '../messages';
-import type { DisplayList } from '../protocol';
+import type { DisplayList, PageUpdate } from '../protocol';
 import { ResourceLoader } from '../resources';
 import type { Screen, Session, SessionOutput } from '../session';
 import { describe, SessionStatus } from '../status';
+import { layoutNeedsPdf } from './layoutPdf';
 
 export const VIEW_TYPE = 'realtimeTex.preview';
 
@@ -31,6 +32,14 @@ export class PreviewPanel implements vscode.Disposable {
   private ready = false;
   private backlog: HostToWebview[] = [];
   private disposed = false;
+  private sentLayouts = 0;
+  private sentPdfBytes = 0;
+  private sentPreviews = 0;
+  /** Transport counters for integration checks and profiling; excludes queued messages. */
+  get transportStats(): { layouts: number; pdfBytes: number; previews: number } {
+    return { layouts: this.sentLayouts, pdfBytes: this.sentPdfBytes, previews: this.sentPreviews };
+  }
+
 
   static create(ctx: vscode.ExtensionContext, host: PanelHost, column: vscode.ViewColumn, preserveFocus: boolean): PreviewPanel {
     const panel = vscode.window.createWebviewPanel(
@@ -76,6 +85,7 @@ export class PreviewPanel implements vscode.Disposable {
     this.session = session;
     this.sentFonts.clear();
     this.sentImages.clear();
+    this.missing.clear();
     this.panel.title = `Preview ${session.mainRel}`;
     this.sessionSubs = [
       session.onOutput((o) => this.onOutput(session, o)),
@@ -110,6 +120,11 @@ export class PreviewPanel implements vscode.Disposable {
       this.backlog.push(m);
       return;
     }
+    if (m.type === 'layout') {
+      this.sentLayouts++;
+      this.sentPdfBytes += m.pdf?.byteLength ?? 0;
+    }
+    if (m.type === 'pagePreview') this.sentPreviews++;
     void this.panel.webview.postMessage(m);
   }
 
@@ -128,14 +143,19 @@ export class PreviewPanel implements vscode.Disposable {
     this.postStatus(s.status);
     this.postScreen(s.screen);
     if (s.model.hasLayout) {
-      const pages = [...s.model.pages.values()];
+      const replay = s.model.replayLayout();
+      const pages = replay.pages;
+      const previews = s.model.pagePreviews();
+      const layoutVersion = s.model.layoutVersion;
       const overlays = [...s.model.overlays.values()];
       this.enqueue(async () => {
         const dls = [...pages.map((p) => p.dl), ...overlays.map((o) => o.dl)];
-        const pdf = (await this.needsPdf(s, dls, pages.some((p) => !p.exact))) ? await readPdf(s.pdfPath) : null;
-        const placements = [...s.model.placements].map(([par_id, fragments]) => ({ par_id, fragments, lines: 0, kind: '' }));
-        this.post({ type: 'layout', pages, pagesTotal: s.model.pagesTotal, placements, keepFromRevision: null, pdf });
+        const pdf = (await this.needsPdf(s, dls, pages)) ? await readPdf(s.pdfPath) : null;
+        this.post({ type: 'layout', pages, pagesTotal: replay.pagesTotal, placements: replay.placements, keepFromRevision: null, layoutVersion, pdf });
         for (const o of overlays) this.post({ type: 'paragraph', parId: o.parId, dl: o.dl, native: o.native, fragments: o.fragments, revision: o.revision });
+        for (const ev of previews) {
+          if (!(await this.needsPdf(s, [ev.page.dl], [ev.page]))) this.post({ type: 'pagePreview', ev });
+        }
         this.post({ type: 'held', units: s.heldUnits });
       });
     }
@@ -143,14 +163,29 @@ export class PreviewPanel implements vscode.Disposable {
 
   private onOutput(s: Session, o: SessionOutput): void {
     switch (o.kind) {
-      case 'layout': {
+      case 'pagePreview': {
         const ev = o.ev;
         this.enqueue(async () => {
+          // Do not replace a page until its native drawing and resources are usable.
+          if (await this.needsPdf(s, [ev.page.dl], [ev.page])) return;
+          if (!s.model.applyPagePreview(ev).size) return;
+          this.post({ type: 'pagePreview', ev });
+        });
+        break;
+      }
+      case 'resetPagePreviews':
+        this.enqueue(async () => this.post({ type: 'resetPagePreviews', runId: o.ev.run_id, baseLayoutVersion: o.ev.base_layout_version }));
+        break;
+      case 'layout': {
+        const ev = o.ev;
+        // Freeze this layout's retained pages before the asynchronous resource queue runs.
+        const pages = [...s.model.pages.values()];
+        this.enqueue(async () => {
           const dls = ev.pages_changed.map((p) => p.dl);
-          const pdf = (await this.needsPdf(s, dls, ev.pages_changed.some((p) => !p.exact) || ev.pdf_fallback !== null))
+          const pdf = (await this.needsPdf(s, dls, pages))
             ? await readPdf(o.pdfPath)
             : null;
-          this.post({ type: 'layout', pages: ev.pages_changed, pagesTotal: ev.pages_total, placements: ev.placements, keepFromRevision: o.keepFromRevision, pdf });
+          this.post({ type: 'layout', pages: ev.pages_changed, pagesTotal: ev.pages_total, placements: ev.placements, keepFromRevision: o.keepFromRevision, layoutVersion: ev.versions.layout_version, pdf });
         });
         break;
       }
@@ -179,12 +214,15 @@ export class PreviewPanel implements vscode.Disposable {
   }
 
   /** Send missing fonts/images; true when some page will need the PDF instead. */
-  private async needsPdf(s: Session, dls: DisplayList[], degraded: boolean): Promise<boolean> {
-    const missing = await this.sendResources(s, dls);
-    return degraded || missing;
+  private async needsPdf(s: Session, dls: DisplayList[], pages: PageUpdate[]): Promise<boolean> {
+    await this.sendResources(s, dls);
+    return layoutNeedsPdf(pages, (p) =>
+      Object.values(p.dl.fonts ?? {}).some((d) => this.missing.has(fontKey(d))) ||
+      Object.values(p.dl.images_info ?? {}).some((i) => this.missing.has(`image:${i.file}`)),
+    );
   }
 
-  private async sendResources(s: Session, dls: DisplayList[]): Promise<boolean> {
+  private async sendResources(s: Session, dls: DisplayList[]): Promise<void> {
     const loader = this.host.resources(s);
     const [fonts, images] = await Promise.all([loader.fontsFor(dls, this.sentFonts), loader.imagesFor(dls, this.sentImages, s.projectRoot)]);
     for (const [k, f] of fonts) {
@@ -202,12 +240,6 @@ export class PreviewPanel implements vscode.Disposable {
       }
     }
     if (fonts.size || images.size) this.post({ type: 'resources', fonts: [...fonts], images: [...images] });
-    // fonts or images this preview cannot draw make the PDF necessary
-    return dls.some(
-      (dl) =>
-        Object.values(dl.fonts ?? {}).some((d) => this.missing.has(fontKey(d))) ||
-        Object.values(dl.images_info ?? {}).some((i) => this.missing.has(`image:${i.file}`)),
-    );
   }
 
   private missing = new Set<string>();

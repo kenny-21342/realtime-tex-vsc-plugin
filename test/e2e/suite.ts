@@ -9,6 +9,7 @@ import type { Api } from '../../src/extension';
 import { activeManaged, installedRelease, releaseBinary } from '../../src/config';
 import { installRelease } from '../../src/prebuilt';
 import { runTask, sq } from '../../src/setup';
+import { runLarge } from './large';
 
 const shots = process.env.RTEX_E2E_OUT ?? '';
 
@@ -28,7 +29,14 @@ function screenshot(name: string): Promise<void> {
   if (!shots) return Promise.resolve();
   mkdirSync(shots, { recursive: true });
   if (process.platform === 'darwin') {
-    return new Promise((resolve) => execFile('screencapture', ['-x', path.join(shots, name)], () => resolve()));
+    // Capture the test window even when another application is in front. A desktop shot
+    // can accidentally validate the wrong app and expose unrelated local content.
+    const windowScript = `import CoreGraphics; for w in CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as! [[String:Any]] { let name = w[kCGWindowName as String] as? String ?? ""; if name.contains("[Extension Development Host]") && (w[kCGWindowOwnerPID as String] as? Int) == ${process.ppid} { print(w[kCGWindowNumber as String]!); break } }`;
+    return new Promise((resolve, reject) => execFile('swift', ['-e', windowScript], (err, stdout) => {
+      const id = stdout.trim();
+      if (err || !/^\d+$/.test(id)) { reject(err ?? new Error('cannot find the VS Code test window')); return; }
+      execFile('screencapture', ['-x', '-l', id, path.join(shots, name)], (captureError) => captureError ? reject(captureError) : resolve());
+    }));
   }
   if (!process.env.DISPLAY) return Promise.resolve();
   return new Promise((resolve) => execFile('import', ['-window', 'root', path.join(shots, name)], () => resolve()));
@@ -42,6 +50,10 @@ async function insertAfter(doc: vscode.TextDocument, needle: string, text: strin
 
 export async function run(): Promise<void> {
   try {
+    if (process.env.RTEX_E2E_LARGE_PROJECT) {
+      await runLarge(screenshot);
+      return;
+    }
     await steps();
   } catch (e) {
     const s = vscode.extensions.getExtension<Api>('henryxiaoyang.realtime-tex')?.exports.session();
@@ -82,6 +94,10 @@ async function steps(): Promise<void> {
   await sleep(1500);
   await vscode.commands.executeCommand('notifications.clearAll');
   await screenshot('1-preview.png');
+
+  await waitFor('the initial layout message', () => api.panel()!.transportStats.layouts > 0);
+  if (api.panel()!.transportStats.pdfBytes !== 0) throw new Error('exact/native fixture unnecessarily transferred the full PDF');
+  step('exact/native full layout displayed without transferring the document PDF');
 
   // 2. a keystroke in the main file takes the fast path
   const main = await vscode.workspace.openTextDocument(path.join(folder, 'main.tex'));
@@ -142,6 +158,14 @@ async function steps(): Promise<void> {
   const label = '$y = x/2$';
   const labelAt = pictureDoc.getText().indexOf(label);
   if (labelAt < 0) throw new Error('missing picture label');
+  // A completed earlier revision can arrive while the label's pass is still running.
+  // Track source revisions before editing so a fast pass cannot be missed either.
+  let pictureSettledRevision = -1;
+  const pictureLayouts = s.onOutput((o) => {
+    if (o.kind === 'layout' && o.ev.convergence.state === 'Converged') {
+      pictureSettledRevision = Math.max(pictureSettledRevision, o.ev.versions.source_revision);
+    }
+  });
   const livePicture = new Promise<ParagraphUpdateEvent>((resolve, reject) => {
     const timeout = setTimeout(() => { subscription.dispose(); reject(new Error('no native live picture update')); }, 30000);
     const subscription = s.onOutput((o) => {
@@ -168,7 +192,12 @@ async function steps(): Promise<void> {
   if (s.model.overlays.get(live.par_id) !== previous) throw new Error('unsupported live picture replaced its previous drawing');
   if (s.heldUnits.some((u) => u.parId === live.par_id)) throw new Error('unsupported live picture was outlined as an error');
   step('unsupported live picture kept its previous overlay without an error outline');
-  await waitFor('the edited label layout to settle', () => s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
+  // The unsupported event above is injected by this test, not produced by the engine. A
+  // faster engine may already have finished the real label edit while the screenshot ran.
+  // Request the replacement explicitly rather than depending on a pending background pass.
+  s.recompile();
+  await waitFor('the edited label layout to settle', () => pictureSettledRevision >= live.versions.source_revision && s.status.convergence?.state === 'Converged' && !s.status.pending, 120000);
+  pictureLayouts.dispose();
 
   // 5b. a half-typed coordinate in the TikZ picture: the picture keeps its last good version,
   // outlined, until the coordinate is complete (rtex ≥ 0.0.6, held pictures)
@@ -178,10 +207,25 @@ async function steps(): Promise<void> {
     const full = '(4.5,1.5)';
     const at = intro.getText().indexOf(full);
     if (at < 0) throw new Error('the picture coordinate is not in intro.tex');
-    const pageBefore = s.model.pages.get(2);
+    let pageBefore = s.model.pages.get(2);
+    let heldLayoutSeen = false;
+    let heldPageChanged = false;
+    const heldLayouts = s.onOutput((o) => {
+      if (o.kind !== 'layout') return;
+      const page = s.model.pages.get(2);
+      if (o.ev.held?.length) {
+        heldLayoutSeen = true;
+        heldPageChanged ||= page !== pageBefore && page?.hash !== pageBefore?.hash;
+      } else if (o.ev.compile.state === 'Ok') {
+        // A valid queued snapshot may arrive after the edit. The held result must retain
+        // the latest good page, including such a snapshot, rather than an older baseline.
+        pageBefore = page;
+      }
+    });
     await ed.edit((e) => e.replace(new vscode.Range(intro.positionAt(at), intro.positionAt(at + full.length)), '(4.5,'));
-    await waitFor('the picture to be held', () => (s.status.held ?? 0) > 0, 120000);
-    if (s.model.pages.get(2) !== pageBefore && s.model.pages.get(2)?.hash !== pageBefore?.hash) throw new Error('the page with the held picture changed');
+    await waitFor('the picture to be held in a full layout', () => heldLayoutSeen && (s.status.held ?? 0) > 0, 120000);
+    heldLayouts.dispose();
+    if (heldPageChanged) throw new Error('the page with the held picture changed');
     step(`broken picture held (${s.heldUnits.map((u) => `line ${u.line ?? '?'}`).join(', ')}), its page unchanged`);
     await api.panel()!.panel.webview.postMessage({ type: 'reveal', page: 2, x: 0, y: 0, force: true });
     await sleep(2500);
@@ -219,6 +263,41 @@ async function steps(): Promise<void> {
   api.panel()!.panel.dispose();
   await waitFor('the engine to stop', () => !s.running, 10000);
   step('engine stopped when the preview closed');
+
+  // A slow suffix makes the distinction between a shipped page and a completed layout observable.
+  const reflowFile = path.join(folder, 'reflow.tex');
+  await vscode.workspace.fs.writeFile(vscode.Uri.file(reflowFile), Buffer.from(
+    '\\documentclass{article}\n\\usepackage[paperwidth=240pt,paperheight=320pt,margin=20pt]{geometry}\n' +
+    '\\begin{document}\nAnchor words in a paragraph that can grow across more lines.\n\nFollowing text.\n\n' +
+    '\\newpage\n\\directlua{local t=os.clock()+1; while os.clock()<t do end}\nSlow suffix.\n\\end{document}\n'));
+  const reflowDoc = await vscode.workspace.openTextDocument(reflowFile);
+  await vscode.window.showTextDocument(reflowDoc, vscode.ViewColumn.One);
+  await vscode.commands.executeCommand('realtimeTex.openPreview');
+  await waitFor('the reflow session', () => api.session()?.mainFile === reflowFile, 10000);
+  const srFlow = api.session()!;
+  await waitFor('the initial reflow layout', () => srFlow.status.convergence?.state === 'Converged' && !srFlow.status.pending, 120000);
+  const previewsBefore = api.panel()!.transportStats.previews;
+  let previewAt = 0;
+  let previewRevision = 0;
+  let finalAt = 0;
+  const reflowProgress = srFlow.onOutput((o) => {
+    if (o.kind === 'pagePreview' && o.ev.page.page === 1) {
+      previewAt ||= Date.now();
+      previewRevision = Math.max(previewRevision, o.ev.source_revision);
+    }
+    if (o.kind === 'layout' && previewRevision && o.ev.versions.source_revision >= previewRevision && o.ev.convergence.state === 'Converged') finalAt = Date.now();
+  });
+  try {
+    await insertAfter(reflowDoc, 'Anchor words', ' additional words'.repeat(20));
+    await waitFor('an accepted reflow page', () => api.panel()!.transportStats.previews > previewsBefore, 120000);
+    await sleep(80);
+    await screenshot('6-reflow-page-preview.png');
+    await waitFor('the final reflow layout', () => finalAt > 0 && !srFlow.status.pending, 120000);
+    if (finalAt - previewAt < 300) throw new Error('page preview did not precede the slow suffix');
+    step('reflow page displayed before the slow document suffix completed');
+  } finally { reflowProgress.dispose(); }
+  api.panel()!.panel.dispose();
+  await waitFor('the reflow engine to stop', () => !srFlow.running, 10000);
 
   // 9. a document whose first compile fails explains why instead of waiting forever
   const broken = path.join(folder, 'broken.tex');

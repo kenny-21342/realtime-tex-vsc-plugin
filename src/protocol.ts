@@ -269,6 +269,21 @@ export interface LayoutUpdateEvent {
   held?: HeldPicture[];
 }
 
+export interface PagePreviewEvent {
+  event: 'PagePreview';
+  run_id: number;
+  base_layout_version: number;
+  source_revision: number;
+  page: PageUpdate;
+  /** Placements on this page only. */
+  placements: Placement[];
+}
+export interface PagePreviewResetEvent {
+  event: 'PagePreviewReset';
+  run_id: number;
+  base_layout_version: number;
+}
+
 /** A picture rtex shows in its last good version (realtime-tex docs/how-it-works.md, "Held pictures"). */
 export interface HeldPicture {
   /** The unit (span) that shows it; the placements give its place. */
@@ -310,6 +325,8 @@ export interface PdfExportedEvent {
 }
 
 export type RtexEvent =
+  | PagePreviewEvent
+  | PagePreviewResetEvent
   | ParagraphUpdateEvent
   | LayoutUpdateEvent
   | DiagnosticsEvent
