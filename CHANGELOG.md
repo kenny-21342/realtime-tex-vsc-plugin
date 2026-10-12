@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Full layouts made entirely of exact or natively drawable pages no longer transfer and open
+  the whole document PDF on every update. Unsupported pages and missing fonts or images still
+  use the PDF, including unchanged pages retained from an earlier layout.
+
 - Live picture label edits draw the engine's native paths and glyph transforms at each row's
   placement, keeping axes, lines and rotated labels. Requires the engine change planned for
   v0.0.7. With older engines or unsupported literals, the complete previous unit stays visible

@@ -83,6 +83,10 @@ async function steps(): Promise<void> {
   await vscode.commands.executeCommand('notifications.clearAll');
   await screenshot('1-preview.png');
 
+  await waitFor('the initial layout message', () => api.panel()!.transportStats.layouts > 0);
+  if (api.panel()!.transportStats.pdfBytes !== 0) throw new Error('exact/native fixture unnecessarily transferred the full PDF');
+  step('exact/native full layout displayed without transferring the document PDF');
+
   // 2. a keystroke in the main file takes the fast path
   const main = await vscode.workspace.openTextDocument(path.join(folder, 'main.tex'));
   await insertAfter(main, 'This paragraph is typeset', ' live and instantly');
