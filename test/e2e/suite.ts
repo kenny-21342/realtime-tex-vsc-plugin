@@ -317,6 +317,54 @@ async function steps(): Promise<void> {
   api.panel()!.panel.dispose();
   await waitFor('the reflow engine to stop', () => !srFlow.running, 10000);
 
+  // A document without a standalone body-paragraph donor. The next paragraph must
+  // borrow outer heading/list state, then become a captured green-gutter live unit.
+  for (const [name, prefix] of [
+    ['heading', '\\paragraph{Run-in title.} Existing text.\n'],
+    ['empty-heading', '\\section{Section}\n\\paragraph{Run-in title.}\n'],
+    ['display-heading', '\\paragraph{Display title.}\n'],
+    ['list', '\\begin{itemize}\n\\item Existing text.\n\\end{itemize}\n'],
+  ]) {
+    const file = path.join(folder, `new-${name}.tex`);
+    const setup = name === 'display-heading' ? '\\usepackage{titlesec}\n\\titleformat{\\paragraph}[hang]{\\normalsize\\bfseries}{}{1em}{}\n\\titlespacing*{\\paragraph}{0pt}{2ex}{1em}\n' : '';
+    await vscode.workspace.fs.writeFile(vscode.Uri.file(file), Buffer.from(
+      `\\documentclass{article}\n${setup}\\begin{document}\n${prefix}\n\\end{document}\n`));
+    const doc = await vscode.workspace.openTextDocument(file);
+    const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);
+    await vscode.commands.executeCommand('realtimeTex.openPreview');
+    await waitFor('the boundary session', () => api.session()?.mainFile === file, 10000);
+    const session = api.session()!;
+    await waitFor('the boundary layout', () => session.status.convergence?.state === 'Converged' && !session.status.pending, 120000);
+    let id: number | undefined;
+    let updates = 0;
+    const subscription = session.onOutput((o) => {
+      if (o.kind !== 'paragraph' || !o.ev.dl.lines.some((l) => l.items.some((i) => i[0] === 'g' && i[2] === 90))) return;
+      id = o.ev.par_id;
+      updates++;
+    });
+    try {
+      let at = doc.getText().indexOf('\\end{document}');
+      for (const text of ['\n', 'Z', 'ebra', '\n', 'new line text.']) {
+        const before = updates;
+        await editor.edit((e) => e.insert(doc.positionAt(at), text));
+        at += text.length;
+        if (text.trim() || id !== undefined) await waitFor('a live boundary paragraph update', () => updates > before, 30000);
+      }
+      await waitFor('the new boundary paragraph layout', () => session.status.convergence?.state === 'Converged' && !session.status.pending, 120000);
+      const marks = await session.liveMarks(doc);
+      if (id === undefined || !marks.some((m) => m.span.id === id && m.kind === 'live')) {
+        throw new Error(`the new paragraph after ${name} never got a green live gutter`);
+      }
+      const before = updates;
+      await editor.edit((e) => e.insert(doc.positionAt(at), ' more text'));
+      await waitFor('live editing after the new paragraph is captured', () => updates > before, 30000);
+      step(`new paragraph after ${name}: Enter, typing, green gutter and subsequent live edit`);
+      await screenshot(`6c-new-${name}-gutter.png`);
+    } finally { subscription.dispose(); }
+    api.panel()!.panel.dispose();
+    await waitFor('the boundary engine to stop', () => !session.running, 10000);
+  }
+
   // 9. a document whose first compile fails explains why instead of waiting forever
   const broken = path.join(folder, 'broken.tex');
   await vscode.workspace.fs.writeFile(
