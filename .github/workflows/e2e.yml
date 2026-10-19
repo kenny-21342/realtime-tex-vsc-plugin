@@ -7,6 +7,8 @@ on:
   push:
     branches: [main]
     paths-ignore: ['**.md', 'docs/**']
+  pull_request:
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
     inputs:
       engine_ref:
@@ -91,5 +93,79 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-shots-${{ runner.os }}
+          path: ${{ runner.temp }}/shots
+          if-no-files-found: ignore
+
+  render:
+    # The preview's drawing code against MuPDF (test/render): realtime-tex's picture corpus,
+    # every page drawn natively, each within 6% of the PDF's ink (anti-aliasing alone is ~3%).
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check out realtime-tex
+        uses: actions/checkout@v5
+        with:
+          repository: kenny-21342/realtime-tex
+          ref: kenny/main
+          path: rtex
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rtex
+
+      - name: Build rtex and gfx_dump
+        working-directory: rtex
+        run: |
+          cargo build --release -p rtex-cli
+          cargo build --release -p rtex-dl --example gfx_dump
+
+      - name: Cache TeX Live
+        id: tl
+        uses: actions/cache@v4
+        with:
+          path: rtex/build/texlive
+          key: texlive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rtex/scripts/install-texlive.sh', 'rtex/scripts/texlive.profile') }}
+
+      - name: Install TeX Live
+        if: steps.tl.outputs.cache-hit != 'true'
+        run: rtex/scripts/install-texlive.sh
+
+      - name: Write env
+        run: |
+          rtex/scripts/install-texlive.sh > /dev/null
+          grep -v '^export PATH=' rtex/build/texlive.env | sed -e 's/^export //' -e 's/"//g' >> "$GITHUB_ENV"
+          echo "$PWD/rtex/build/texlive/bin/x86_64-linux" >> "$GITHUB_PATH"
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci && npm install --no-save playwright-core && npx playwright-core install chromium
+
+      - run: python3 -m pip install --user --break-system-packages pymupdf numpy pillow
+
+      - name: Page lists of the picture corpus
+        run: |
+          rtex/target/release/rtex verify --project rtex/fixtures/corpus/pictures --build "$RUNNER_TEMP/rc"
+          rtex/target/release/examples/gfx_dump "$RUNNER_TEMP"/rc/capture/main.rtex-page*.json > "$RUNNER_TEMP/gfx.jsonl"
+
+      - name: Render and compare
+        run: |
+          npm run build:render
+          export CHROMIUM=$(node -e "console.log(require('playwright-core').chromium.executablePath())")
+          export PLAYWRIGHT_CORE=$PWD/node_modules/playwright-core
+          RTEX_RENDER_PROJECT=$PWD/rtex/fixtures/corpus/pictures node out/render/run.js "$RUNNER_TEMP/shots" 150 "$RUNNER_TEMP/gfx.jsonl"
+          python3 test/render/compare.py "$RUNNER_TEMP/rc/capture/main.pdf" "$RUNNER_TEMP/shots" 150 --diff 3 --max 0.06 --require-native
+
+      - name: Upload renders
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-check
           path: ${{ runner.temp }}/shots
           if-no-files-found: ignore

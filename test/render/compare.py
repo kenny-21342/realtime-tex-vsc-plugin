@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Compare the preview's drawing of pages (test/render/run.ts PNGs) with MuPDF's rendering.
 
-Usage: compare.py PDF PNG_DIR DPI [--diff N]
+Usage: compare.py PDF PNG_DIR DPI [--diff N] [--max SHARE] [--require-native]
 Per page: the share of pixels whose largest channel difference exceeds 64/255 (ink where the
 other has none, or missing ink), after a 1-pixel tolerance for anti-aliasing (a pixel counts
 only when no pixel within 1 px of it in the other image is close). --diff N writes diff images
-for the N worst pages (red: only in the preview, blue: only in the PDF).
+for the N worst pages (red: only in the preview, blue: only in the PDF). --max SHARE: exit 1
+when a page's preview-only plus pdf-only share exceeds SHARE (CI uses 0.06; anti-aliasing and
+hinting alone stay near 0.03). --require-native: exit 1 when a page is not drawn natively.
 """
 import json
 import sys
@@ -34,6 +36,8 @@ def near(a, b, tol=64):
 def main():
     pdf, pngdir, dpi = sys.argv[1], Path(sys.argv[2]), int(sys.argv[3])
     ndiff = int(sys.argv[sys.argv.index("--diff") + 1]) if "--diff" in sys.argv else 0
+    limit = float(sys.argv[sys.argv.index("--max") + 1]) if "--max" in sys.argv else None
+    require_native = "--require-native" in sys.argv
     doc = pymupdf.open(pdf)
     summary = {s["page"]: s for s in json.load(open(pngdir / "summary.json"))}
     rows = []
@@ -59,6 +63,16 @@ def main():
         Image.fromarray(img).save(pngdir / f"diff-page{n}.png")
     if rows:
         print("worst page (preview-only + pdf-only):", max((r[2] + r[3], r[0]) for r in rows))
+    failed = []
+    if limit is not None:
+        failed += [f"page {r[0]}: {r[2] + r[3]:.4f} > {limit}" for r in rows if r[2] + r[3] > limit]
+    if require_native:
+        failed += [f"page {n}: not native ({s['reason']})" for n, s, *_ in rows if not s["native"]]
+    if not rows:
+        failed.append("no pages")
+    for f in failed:
+        print("FAIL", f)
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

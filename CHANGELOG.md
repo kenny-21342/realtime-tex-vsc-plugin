@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- CI: the build and the end-to-end suite (Linux, macOS, Windows) also run on pull requests, not
+  only after a push to `main`; a new `render` job checks the preview's drawing against MuPDF on
+  realtime-tex's picture corpus (`test/render/compare.py --max 0.06 --require-native`).
+
 ## 0.0.3 (2026-10-13)
 
 - Newly added paragraphs keep live feedback while the engine updates pagination. The Live
