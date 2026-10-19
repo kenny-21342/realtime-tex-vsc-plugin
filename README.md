@@ -193,7 +193,9 @@ python3 test/render/compare.py BUILD/layout.pdf OUT 150 --diff 3   # per-page di
 
 The check loads fonts the way the extension does but not raster images (such pages report "an
 image has no source file"; the preview itself loads them), so it covers text, rules and native
-drawing.
+drawing. `--max 0.06 --require-native` makes it a gate: the `render` job of the E2E workflow runs
+it on realtime-tex's picture corpus for every pull request (anti-aliasing and hinting alone
+differ in about 3% of the ink).
 
 ### Layout
 
