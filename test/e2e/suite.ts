@@ -316,6 +316,8 @@ async function steps(): Promise<void> {
   } finally { reflowProgress.dispose(); }
   api.panel()!.panel.dispose();
   await waitFor('the reflow engine to stop', () => !srFlow.running, 10000);
+  // a second main file in the folder would make later steps' main file ambiguous
+  await vscode.workspace.fs.delete(vscode.Uri.file(reflowFile));
 
   // A document without a standalone body-paragraph donor. The next paragraph must
   // borrow outer heading/list state, then become a captured green-gutter live unit.
@@ -363,6 +365,7 @@ async function steps(): Promise<void> {
     } finally { subscription.dispose(); }
     api.panel()!.panel.dispose();
     await waitFor('the boundary engine to stop', () => !session.running, 10000);
+    await vscode.workspace.fs.delete(vscode.Uri.file(file));
   }
   // 8b. Preview This File Only: a file without \documentclass, in the template, from the main folder
   const part = path.join(folder, 'chapters', 'part.tex');
