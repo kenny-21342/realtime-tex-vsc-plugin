@@ -86,7 +86,7 @@ export class PreviewPanel implements vscode.Disposable {
     this.sentFonts.clear();
     this.sentImages.clear();
     this.missing.clear();
-    this.panel.title = `Preview ${session.mainRel}`;
+    this.panel.title = `Preview ${session.name}`;
     this.sessionSubs = [
       session.onOutput((o) => this.onOutput(session, o)),
       session.onStatus((s) => this.postStatus(s)),
