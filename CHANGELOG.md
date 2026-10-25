@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Preview This File Only** previews one file of a project on its own. A file with its own `\documentclass` is previewed as it is; a file without one is wrapped in the new `realtimeTex.previewTemplate` setting (a plain `article` by default), with its paths resolved from the main file's folder. Suggested by EvanMa1 (HenryXiaoYang/realtime-tex-vsc-plugin#9).
+- Double-clicking the preview now jumps to the source even when that paragraph comes from a file no editor has open, such as an `\include`d chapter. Before, it said "No source paragraph found". Thanks to Steve-Li-1998 (HenryXiaoYang/realtime-tex-vsc-plugin#7).
 - CI: the build and the end-to-end suite (Linux, macOS, Windows) also run on pull requests, not
   only after a push to `main`; a new `render` job checks the preview's drawing against MuPDF on
   realtime-tex's picture corpus (`test/render/compare.py --max 0.06 --require-native`).
