@@ -1,4 +1,11 @@
-# Realtime TeX Live Preview
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/HenryXiaoYang/realtime-tex-vsc-plugin/main/docs/logo-dark.png">
+    <img src="https://raw.githubusercontent.com/HenryXiaoYang/realtime-tex-vsc-plugin/main/docs/logo.png" alt="realtime-tex logo: a T. rex in sunglasses between curly braces, then -TeX" width="520">
+  </picture>
+</p>
+
+# Realtime TeX
 
 English | [简体中文](README.zh-CN.md)
 
@@ -10,6 +17,10 @@ references and bibliographies follow from a full compile in the background.
 ![Typing in the editor; the preview follows every keystroke](docs/demo.gif)
 
 ## Quick start
+
+Install **Realtime TeX** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=henryxiaoyang.realtime-tex) (or [Open VSX](https://open-vsx.org/extension/henryxiaoyang/realtime-tex) for VSCodium, Cursor and other editors), or search for "realtime tex" in the Extensions view:
+
+<img src="https://raw.githubusercontent.com/HenryXiaoYang/realtime-tex-vsc-plugin/main/docs/marketplace.png" alt="Realtime TeX in the Extensions view of VS Code, with its Install button" width="362">
 
 1. Open a folder with a LaTeX project. Linux, macOS and Windows are supported.
 2. Open a `.tex` file and click the **preview icon** in the editor title bar, or press **Ctrl+Alt+V** (**Cmd+Alt+V** on Mac).
@@ -34,6 +45,7 @@ The extension updates itself too. It is not on the Marketplace: every change mer
 | **Status pill** | **Live · 0.8 ms** means the paragraph was re-typeset that fast. **Updating layout…** means a full compile is placing pages, references and floats. **Up to date** means everything matches. **N errors** opens the Problems panel. |
 | **Live markers** | A bar next to the line numbers shows how each part of your source updates: **solid green** updates live as you type, **dotted amber** waits for the full compile (the preamble, TikZ, …). Hover over a part that went to the full compile to see why. |
 | **Follow cursor** | The preview scrolls to the paragraph you are editing. **Ctrl+Alt+J** jumps there on demand. |
+| **Links** | Click a link made by `hyperref` (`\href`, `\url`, `\ref`, a table of contents entry, …) to open it or jump within the document. Use the mouse back button to return after an internal jump (up to 50 positions). Links match the displayed layout; a link inside a paragraph you are editing reappears when the full compile catches up. |
 | **Jump to source** | Double-click (or Ctrl/Cmd+click) a paragraph in the preview. |
 | **Zoom** | Ctrl + mouse wheel, Ctrl + = / − / 0 |
 | **Export PDF** | **Ctrl+Alt+E**. Writes `main.pdf` next to the main file. The result matches a clean LuaLaTeX build. |
@@ -88,6 +100,9 @@ PDF round trip. It supports:
 - TikZ/pgf drawings (paths, fills, strokes, dashes, clips, opacity, axial and radial shadings,
   rotated or scaled node text), including pictures reused from the picture cache, when the engine
   sends their drawing (`native` in rtex's page updates; rtex with native drawing, see below).
+- hyperlink annotations from the background PDF (`\href`, `\url`, `\ref`, …), over pages drawn
+  either from display lists or from the PDF. Their hotspots use the same fit as the canvas and
+  the PDF snapshot of that layout.
 
 Some pages still cannot be drawn this way, for example tiling patterns or other `\special`s. Those
 are shown from the background PDF, marked with a small **from PDF** badge, and edits on them still
@@ -184,7 +199,9 @@ git tag v0.0.1 && git push origin v0.0.1
 The **Release** workflow builds the `.vsix`, checks that the tag matches `package.json`, and
 creates the GitHub release with the changelog section as notes and the `.vsix` (plus its
 SHA-256) attached. Publishing a release in the GitHub UI, or running the workflow by hand with a
-tag, attaches the `.vsix` to an existing release.
+tag, attaches the `.vsix` to an existing release. The same workflow publishes the `.vsix` to the
+VS Code Marketplace with Trusted Publishing in the upstream repository only, and to Open VSX
+when the `OVSX_PAT` secret is set.
 ### Render check
 
 `test/render` draws rtex page lists with the preview's own drawing code in headless Chromium and

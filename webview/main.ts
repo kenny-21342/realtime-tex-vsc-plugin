@@ -1,7 +1,17 @@
 // The live preview webview: toolbar, guided state screens, lazily rendered pages.
+import { readingOrder, words, type Word } from './textLayer';
 import type { Action, HostToWebview, PillKind, ScreenKind, WebviewToHost } from '../src/messages';
 import { SP_PER_BP } from '../src/protocol';
+import {
+  LinkOverlay,
+  targetPoint,
+  type LinkDocumentLike,
+  type LinkLayerLike,
+  type LinkPageState,
+  type PdfPageTargetGeometry,
+} from './links';
 import { cachedPictureMoves, PreviewModel, Rect } from './model';
+import { anchorPosition, BackMouseHandler, captureAnchor, clampScroll, NavigationHistory, scrollChanged } from './navigation';
 import { initPdfWorker, openPdf, PdfDoc, rasterizePdfImage, renderPdfPage } from './pdf';
 import { indexNative, nativeOf } from './native';
 import { drawOverlay } from './overlay';
@@ -32,6 +42,9 @@ void initPdfWorker(boot.workerUrl);
 const model = new PreviewModel();
 const fonts = new FontStore();
 const images = new ImageStore(rasterizePdfImage);
+/** Whether each page's current canvas came from the PDF (true) or its display list (false).
+ * Link geometry must follow the canvas that is actually shown. */
+const pageDrawMode = new Map<number, boolean>();
 let pdfDoc: PdfDoc | undefined;
 let pdfPages = 0;
 /** Serial of the loaded PDF, and per page the serial of the PDF that matches its current
@@ -102,6 +115,17 @@ const followBtn = $<HTMLButtonElement>('follow');
 const screen = $<HTMLElement>('screen');
 const banner = $<HTMLElement>('banner');
 const toast = $<HTMLElement>('toast');
+const navigationHistory = new NavigationHistory();
+const backMouse = new BackMouseHandler(() => navigationHistory.size > 0, goBack);
+
+// Link annotations of the background PDF. Nodes are created only for pages that became
+// visible, updated in place when a paragraph is edited, and dropped when the layout changes.
+const linkOverlay = new LinkOverlay(
+  document as unknown as LinkDocumentLike,
+  pageLinkState,
+  linkLayer,
+  (callback) => requestAnimationFrame(callback),
+);
 
 // Toolbar: drop button labels, then secondary items, when the panel is too narrow for one row
 const toolbar = document.querySelector<HTMLElement>('.toolbar')!;
@@ -185,6 +209,34 @@ function restoreAnchor(a: { page: number; frac: number }): void {
   if (el) viewport.scrollTop = el.offsetTop + a.frac * el.offsetHeight;
 }
 
+function navigationPageBox(el: HTMLElement) {
+  return { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight };
+}
+
+function clampToViewport(position: { left: number; top: number }) {
+  return clampScroll(position, viewport.scrollWidth - viewport.clientWidth, viewport.scrollHeight - viewport.clientHeight);
+}
+
+function goBack(): void {
+  let anchor;
+  while ((anchor = navigationHistory.pop())) {
+    const el = pageEl(anchor.page);
+    if (!el) continue;
+    const position = anchorPosition(anchor, navigationPageBox(el));
+    if (!position) continue;
+    const destination = clampToViewport(position);
+    const changed = scrollChanged({ left: viewport.scrollLeft, top: viewport.scrollTop }, destination);
+    // Explicit instant scrolling also cancels an in-flight smooth link jump.
+    viewport.scrollTo({ ...destination, behavior: 'instant' });
+    if (changed) break;
+  }
+}
+
+for (const type of ['mousedown', 'mouseup', 'auxclick'] as const) {
+  window.addEventListener(type, (event) => backMouse.handle(event), { capture: true });
+}
+window.addEventListener('blur', () => backMouse.reset());
+
 // ---------------------------------------------------------------------------------------------
 // Pages
 
@@ -199,6 +251,7 @@ const observer = new IntersectionObserver(
       const n = Number((e.target as HTMLElement).dataset.page);
       if (e.isIntersecting) visible.add(n);
       else visible.delete(n);
+      linkOverlay.setVisible(n, e.isIntersecting);
     }
     scheduleRender();
     updatePageNo();
@@ -208,6 +261,11 @@ const observer = new IntersectionObserver(
 
 function pageEls(): HTMLElement[] {
   return Array.from(pagesEl.children) as HTMLElement[];
+}
+
+/** The page element by number, without scanning the whole page list. */
+function pageEl(n: number): HTMLElement | undefined {
+  return (pagesEl.children.item(n - 1) as HTMLElement | null) ?? undefined;
 }
 
 function pageSizeSp(n: number): [number, number] {
@@ -223,37 +281,55 @@ function pageView(n: number): { rot: number; w: number; h: number; shownW: numbe
   return { rot, w, h, shownW, shownH };
 }
 
+/** Geometry for the link overlay of page `n`, read only when that page is drawn. */
+function pageLinkState(n: number): LinkPageState {
+  const [widthSp, heightSp] = pageSizeSp(n);
+  return { widthSp, heightSp, fromPdf: pageDrawMode.get(n) === true, covered: linkOcclusions(n) };
+}
+
+function linkLayer(n: number): LinkLayerLike | undefined {
+  const layer = pageEl(n)?.querySelector<HTMLElement>('.link-layer');
+  return (layer as unknown as LinkLayerLike | null) ?? undefined;
+}
+
 /** Create/remove page elements to match the model and size them for the current zoom. */
 function layoutPages(): void {
-  const els = pageEls();
-  for (let i = els.length; i < model.pagesTotal; i++) {
+  for (let i = pagesEl.children.length; i < model.pagesTotal; i++) {
     const el = document.createElement('div');
     el.className = 'page';
     el.dataset.page = String(i + 1);
-    el.innerHTML = '<canvas></canvas><span class="badge" hidden></span>';
+    el.innerHTML = '<canvas></canvas><div class="text-layer"></div><div class="link-layer"></div><span class="badge" hidden></span>';
     el.title = '';
     pagesEl.appendChild(el);
     observer.observe(el);
   }
-  for (let i = els.length - 1; i >= model.pagesTotal; i--) {
-    observer.unobserve(els[i]);
-    els[i].remove();
+  for (let i = pagesEl.children.length - 1; i >= model.pagesTotal; i--) {
+    const el = pagesEl.children.item(i) as HTMLElement;
+    observer.unobserve(el);
+    el.remove();
     visible.delete(i + 1);
+    linkOverlay.dropPage(i + 1);
   }
   const k = cssScale();
-  pageEls().forEach((el, i) => {
+  for (let i = 0; i < model.pagesTotal; i++) {
+    const el = pagesEl.children.item(i) as HTMLElement;
     const { shownW: w, shownH: h } = pageView(i + 1);
     el.style.width = `${Math.round(w * k)}px`;
     el.style.height = `${Math.round(h * k)}px`;
     dirty.add(i + 1);
-  });
+  }
   zoomLabel.textContent = zoom === 'fitWidth' ? `${zoomPercent()} %` : `${zoom} %`;
   $<HTMLButtonElement>('fit').classList.toggle('active', zoom === 'fitWidth');
   scheduleRender();
 }
 
 function markDirty(pages: Iterable<number>): void {
-  for (const n of pages) dirty.add(n);
+  for (const n of pages) {
+    dirty.add(n);
+    // Occlusion and the actual draw mode may have changed; percentages do not depend on zoom,
+    // so a zoom only resizes the page element and never rebuilds link nodes.
+    linkOverlay.invalidate(n);
+  }
   scheduleRender();
 }
 
@@ -270,8 +346,63 @@ function scheduleRender(): void {
   });
 }
 
+// ---------------------------------------------------------------------------------------------
+// Links (annotations of the background PDF, laid over the pages)
+
+/** Rectangles (sp) whose content a live edit replaced: links there are stale until the next
+ * full compile. */
+function linkOcclusions(n: number): Rect[] {
+  const pu = model.pages.get(n);
+  if (!pu) return [];
+  const out: Rect[] = [];
+  for (const i of model.hiddenLines(n)) {
+    const line = pu.dl.lines[i];
+    if (!line) continue;
+    out.push({ x: line.x - PT, y: line.y - line.h - PT, w: line.w + 2 * PT, h: line.h + line.d + 2 * PT });
+  }
+  for (const { rows } of model.overlaysOn(n)) {
+    for (const [x0, y0, x1, y1] of rowBands(rows)) out.push({ x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+  }
+  return out;
+}
+
+function targetDrawMode(page: number): 'pdf' | 'displayList' {
+  const known = pageDrawMode.get(page);
+  if (known !== undefined) return known ? 'pdf' : 'displayList';
+  // Not rendered yet: a degraded page will use the PDF once it scrolls in. Exact pages are
+  // drawn from their display list unless missing fonts/images force the PDF later.
+  const pu = model.pages.get(page);
+  return pu && !pu.exact && pdfDoc !== undefined && page <= pdfPages ? 'pdf' : 'displayList';
+}
+
+function activateLink(el: HTMLElement): void {
+  if (el.dataset.url) {
+    post({ type: 'openLink', url: el.dataset.url });
+    return;
+  }
+  const page = Number(el.dataset.page);
+  if (!Number.isInteger(page) || page < 1 || page > model.pagesTotal) return;
+  const y = Number(el.dataset.y);
+  const x = el.dataset.x === undefined ? 0 : Number(el.dataset.x);
+  const aspect = el.dataset.aspect === undefined ? undefined : Number(el.dataset.aspect);
+  const target: PdfPageTargetGeometry = {
+    kind: 'page',
+    page,
+    x: Number.isFinite(x) ? x : 0,
+    y: Number.isFinite(y) ? Math.max(0, Math.min(1, y)) : 0,
+    pageAspect: Number.isFinite(aspect) && (aspect as number) > 0 ? aspect : undefined,
+    userX: el.dataset.userX === undefined ? undefined : Number(el.dataset.userX),
+    userY: el.dataset.userY === undefined ? undefined : Number(el.dataset.userY),
+  };
+  const [wSp, hSp] = pageSizeSp(page);
+  const point = targetPoint(target, wSp, hSp, targetDrawMode(page));
+  // Without raw user-space coordinates a rotated/cropped PDF cannot be placed on a display-list
+  // page. Go to its top rather than to a confidently wrong spot.
+  reveal(page, point?.x ?? 0, point?.y ?? 0, true, true);
+}
+
 async function renderPage(n: number): Promise<void> {
-  const el = pageEls()[n - 1];
+  const el = pageEl(n);
   const pu = model.pages.get(n);
   if (!el || !pu) return;
   const token = (renderToken.get(n) ?? 0) + 1;
@@ -369,6 +500,10 @@ async function renderPage(n: number): Promise<void> {
   canvas.style.width = el.style.width;
   canvas.style.height = el.style.height;
   el.replaceChild(canvas, old);
+  const pageRows = lines.map((line) => ({ dl: pu.dl, line, dx: 0, dy: 0 }));
+  const liveRows = overlays.flatMap(({ overlay, rows }) => rows.map((r) => ({ dl: overlay.dl, line: r.line, dx: r.dx, dy: r.dy })));
+  renderTextLayer(el.querySelector<HTMLElement>('.text-layer')!, words(readingOrder(pageRows, liveRows)), k);
+  orientLayers(el, view, k);
   const badge = el.querySelector<HTMLElement>('.badge')!;
   if (usePdf && !pdfFailed) {
     badge.hidden = false;
@@ -381,9 +516,55 @@ async function renderPage(n: number): Promise<void> {
   } else {
     badge.hidden = true;
   }
+  // Hotspots belong to the canvas that is actually shown: the PDF fit leaves white space when
+  // the rotated/cropped viewport has another aspect, while the display list is the full page.
+  const fromPdf = usePdf && !pdfFailed;
+  if (pageDrawMode.get(n) !== fromPdf) {
+    pageDrawMode.set(n, fromPdf);
+    linkOverlay.invalidate(n);
+  }
 }
 
 const PT = 65536;
+
+let measure: CanvasRenderingContext2D | undefined;
+
+/** The text and link layers are laid out in the page's own coordinates; on a turned page
+ * (landscape, `rotate`) they are turned with it, as the canvas is. */
+function orientLayers(el: HTMLElement, view: { rot: number; w: number; h: number }, k: number): void {
+  for (const layer of el.querySelectorAll<HTMLElement>('.text-layer, .link-layer')) {
+    if (!view.rot) {
+      layer.style.transform = layer.style.width = layer.style.height = '';
+      continue;
+    }
+    const [a, b, c, d, e, f] = turn(view.rot, view.w, view.h);
+    layer.style.transformOrigin = '0 0';
+    layer.style.width = `${view.w * k}px`;
+    layer.style.height = `${view.h * k}px`;
+    layer.style.transform = `matrix(${a}, ${b}, ${c}, ${d}, ${e * k}, ${f * k})`;
+  }
+}
+
+/** Fill `layer` with spans for `ws` at `k` CSS px per sp. */
+function renderTextLayer(layer: HTMLElement, ws: readonly Word[], k: number): void {
+  measure ??= document.createElement('canvas').getContext('2d')!;
+  const frag = document.createDocumentFragment();
+  for (const w of ws) {
+    const px = w.size * k;
+    if (px < 1) continue;
+    const span = document.createElement('span');
+    span.textContent = w.text;
+    span.style.left = `${w.x * k}px`;
+    span.style.top = `${(w.y - w.size * 0.8) * k}px`;
+    span.style.fontSize = `${px}px`;
+    measure.font = `${px}px serif`;
+    const natural = measure.measureText(w.text.trimEnd()).width;
+    if (natural > 0 && w.w > 0) span.style.transform = `scaleX(${(w.w * k) / natural})`;
+    frag.appendChild(span);
+    if (w.eol) frag.appendChild(document.createElement('br'));
+  }
+  layer.replaceChildren(frag);
+}
 
 /** Units shown in their last good version while their source has errors (host's `held`). */
 let heldUnits: { parId: number; line?: number }[] = [];
@@ -578,9 +759,9 @@ function setFollowUi(v: boolean): void {
 }
 setFollowUi(follow);
 
-function reveal(page: number, x: number, y: number, force: boolean): void {
-  const el = pageEls()[page - 1];
-  if (!el) return;
+function reveal(page: number, x: number, y: number, force: boolean, remember = false): void {
+  const el = pageEl(page);
+  if (!el || !Number.isFinite(x) || !Number.isFinite(y)) return;
   const k = cssScale();
   const view = pageView(page);
   const t = turn(view.rot, view.w, view.h);
@@ -591,9 +772,22 @@ function reveal(page: number, x: number, y: number, force: boolean): void {
   const vh = viewport.clientHeight;
   const inView = top > vTop + vh * 0.15 && top < vTop + vh * 0.85;
   if (!force && !follow) return;
-  if (force || !inView) viewport.scrollTo({ top: top - vh * 0.35, behavior: force ? 'smooth' : 'auto' });
   const left = el.offsetLeft + x * k;
-  if (left < viewport.scrollLeft || left > viewport.scrollLeft + viewport.clientWidth) viewport.scrollLeft = left - 40;
+  const destination = clampToViewport({
+    top: force || !inView ? top - vh * 0.35 : viewport.scrollTop,
+    left: left < viewport.scrollLeft || left > viewport.scrollLeft + viewport.clientWidth ? left - 40 : viewport.scrollLeft,
+  });
+  if (remember && scrollChanged({ left: viewport.scrollLeft, top: viewport.scrollTop }, destination)) {
+    const sourcePage = scrollAnchor().page + 1;
+    const sourceEl = pageEl(sourcePage);
+    const anchor = sourceEl && captureAnchor(sourcePage, navigationPageBox(sourceEl), { left: viewport.scrollLeft, top: viewport.scrollTop });
+    if (anchor) navigationHistory.push(anchor);
+  }
+  // A new reveal supersedes any smooth jump already in flight, even if this position
+  // currently looks like a no-op. Only meaningful link departures enter history above.
+  if (force || !inView || destination.left !== viewport.scrollLeft) {
+    viewport.scrollTo({ ...destination, behavior: force ? 'smooth' : 'auto' });
+  }
   if (force) {
     const marker = document.createElement('div');
     marker.className = 'marker';
@@ -618,11 +812,26 @@ function jumpFromEvent(e: MouseEvent): void {
   post({ type: 'jump', page, x, y });
 }
 pagesEl.addEventListener('dblclick', (e) => {
+  if ((e.target as HTMLElement).closest('.pdf-link')) return; // a link opens once, not twice
   window.getSelection()?.removeAllRanges();
   jumpFromEvent(e);
 });
 pagesEl.addEventListener('click', (e) => {
+  const link = (e.target as HTMLElement).closest<HTMLElement>('.pdf-link');
+  if (link) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.detail <= 1) activateLink(link); // a double-click is still one link, not two
+    return;
+  }
   if (e.ctrlKey || e.metaKey) jumpFromEvent(e);
+});
+pagesEl.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const link = (e.target as HTMLElement).closest<HTMLElement>('.pdf-link');
+  if (!link) return;
+  e.preventDefault();
+  activateLink(link);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -701,14 +910,24 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
     case 'layout': {
       restorePreviewPdfSerial();
       const first = !model.hasLayout;
+      // Links of the previous full compile must not stay clickable at other coordinates.
+      // A new display version clears them; the matching links message rebuilds the visible ones.
+      linkOverlay.beginLayout(m.layoutVersion);
       const dirtyPages = model.applyLayout({
         pages: m.pages,
         pagesTotal: m.pagesTotal,
         placements: m.placements,
         keepFromRevision: m.keepFromRevision,
-        layoutVersion: m.layoutVersion,
+        // rtex's version (page previews name it); m.layoutVersion is the panel's serial for links
+        layoutVersion: m.engineLayoutVersion,
       });
-      for (const p of m.pages) pagePdfSerial.set(p.page, m.pdf ? pdfSerial + 1 : Infinity);
+      navigationHistory.prune(model.pagesTotal);
+      for (const p of m.pages) {
+        pagePdfSerial.set(p.page, m.pdf ? pdfSerial + 1 : Infinity);
+        // The canvas is replaced by the render scheduled below; until then the old draw mode
+        // says nothing about the new page content.
+        pageDrawMode.delete(p.page);
+      }
       if (m.pdf) {
         const serial = ++pdfSerial;
         openPdf(m.pdf).then(
@@ -750,6 +969,9 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
       layoutPages();
       updatePageNo();
       break;
+    case 'links':
+      linkOverlay.setLinks(m.links, m.layoutVersion);
+      break;
     case 'paragraph':
       markDirty(model.applyParagraph(m.parId, m.dl, m.fragments, m.revision, m.native));
       break;
@@ -773,13 +995,23 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
     case 'hint':
       showToast(m.text, 9000);
       break;
-    case 'reset':
+    case 'reset': {
+      navigationHistory.clear();
+      backMouse.reset();
       setHasDocument(false);
+      linkOverlay.reset();
       model.clear();
+      for (const el of pageEls()) observer.unobserve(el);
       pagesEl.innerHTML = '';
       visible.clear();
       dirty.clear();
+      renderToken.clear();
+      pageDrawMode.clear();
+      // A PDF load that was still in flight must not install an older document after the reset.
+      ++pdfSerial;
+      const oldDoc = pdfDoc;
       pdfDoc = undefined;
+      void oldDoc?.destroy();
       pdfPages = 0;
       pdfSerialLoaded = 0;
       pagePdfSerial.clear();
@@ -787,6 +1019,7 @@ window.addEventListener('message', (ev: MessageEvent<HostToWebview>) => {
       banner.hidden = true;
       updatePageNo();
       break;
+    }
   }
 });
 

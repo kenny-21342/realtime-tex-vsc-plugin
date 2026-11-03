@@ -26,6 +26,7 @@ import type {
   Span,
 } from './protocol';
 import { ExitInfo, RtexProcess } from './rtexProcess';
+import { layoutPdfPath } from './preview/layoutLinks';
 import { hitTest, PreviewTarget, spanAt, targetInFragments } from './sourceMap';
 import { explainReasons, Phase, SessionStatus } from './status';
 
@@ -46,6 +47,7 @@ export type SessionOutput =
   | { kind: 'dropOverlays'; parIds?: number[] }
   | { kind: 'held'; units: { parId: number; line?: number }[] }
   | { kind: 'reveal'; target: PreviewTarget; force: boolean }
+  | { kind: 'reset' }
   | { kind: 'banner'; text: string | null; level?: 'info' | 'warn' | 'error'; actions?: Action[] };
 
 const ACTIONS = {
@@ -66,6 +68,11 @@ export class Session implements vscode.Disposable {
   readonly name: string;
   /** Pages, placements and overlays (same rules as the webview; used to replay and to sync). */
   readonly model = new PreviewModel();
+  /** rtex layout version of the pages in `model`; 0 before the first layout. */
+  layoutVersion = 0;
+  /** Immutable PDF snapshot of that layout (`bg/layout-<version>.pdf`); links and fallback
+   * rendering both read this file, never the moving `bg/<jobname>.pdf` alias. */
+  layoutPdfPath = '';
 
   private proc: RtexProcess | undefined;
   private server: ServerLocation | undefined;
@@ -132,6 +139,8 @@ export class Session implements vscode.Disposable {
     return this.proc?.running ?? false;
   }
 
+  /** The moving `bg/<jobname>.pdf` alias of the latest layout. Never use it for pages or links:
+   * it can advance while a layout is being queued. `layoutPdfPath` is the version snapshot. */
   get pdfPath(): string {
     return path.join(this.buildDir, 'bg', path.basename(this.mainRel, path.extname(this.mainRel)) + '.pdf');
   }
@@ -189,7 +198,7 @@ export class Session implements vscode.Disposable {
     }
     await fs.mkdir(this.buildDir, { recursive: true });
     if (this.preview) await fs.writeFile(this.mainFile, this.preview.text);
-    const env = processEnv(this.ctx, this.server);
+    const env = processEnv(this.ctx, this.server, this.mainFile);
     this.log.appendLine(`[start] ${this.server.path} serve --project ${this.projectRoot} --main ${this.mainRel} --build ${this.buildDir}${engineArgs(vscode.Uri.file(this.mainFile)).map((a) => ' ' + a).join('')}`);
     if (env.RTEX_TEXLIVE_BIN) this.log.appendLine(`[start] TeX Live: ${env.RTEX_TEXLIVE_BIN}`);
     const dbg = debugDir(this.ctx);
@@ -215,10 +224,15 @@ export class Session implements vscode.Disposable {
     proc.on('exit', (info: ExitInfo) => this.onExit(proc, info));
     this.startedAt = Date.now();
     this.generation = -1;
+    this.layoutVersion = 0;
+    this.layoutPdfPath = '';
     this.model.clear();
     this.gutter.state.clear();
     this.gutter.clear();
-    this.outputEmitter.fire({ kind: 'dropOverlays' });
+    // The preview's pages and links are gone with the model. Without an explicit reset the
+    // webview would keep the previous session's pages (and clickable links) while incremental
+    // layouts of this session replace only some of them.
+    this.outputEmitter.fire({ kind: 'reset' });
     this.setPhase('starting');
     this.setScreen({
       screen: 'starting',
@@ -630,6 +644,11 @@ export class Session implements vscode.Disposable {
     this.bgDiagnosticsThisPass = false;
     this.setDiagnostics('live', []);
     const keepFromRevision = ev.convergence.state === 'Stale' ? ev.convergence.pending_since : null;
+    this.layoutVersion = ev.versions.layout_version;
+    // rtex copies every installed layout to bg/layout-<version>.pdf and keeps the current and
+    // two previous copies. Bind this layout to that snapshot; the moving bg/<jobname>.pdf may
+    // already belong to the next background pass by the time resources are read.
+    this.layoutPdfPath = layoutPdfPath(this.buildDir, ev.versions.layout_version);
     this.model.applyLayout({ pages: ev.pages_changed, pagesTotal: ev.pages_total, placements: ev.placements, keepFromRevision, layoutVersion: ev.versions.layout_version });
     this.refreshLiveStatus();
     // a layout replaces the live results; what it holds is its own list
@@ -647,7 +666,7 @@ export class Session implements vscode.Disposable {
     this.setScreen({ screen: null });
     this.outputEmitter.fire({ kind: 'banner', text: null });
     this.emitStatus();
-    this.outputEmitter.fire({ kind: 'layout', ev, keepFromRevision, pdfPath: ev.pdf_fallback ?? this.pdfPath });
+    this.outputEmitter.fire({ kind: 'layout', ev, keepFromRevision, pdfPath: this.layoutPdfPath });
     this.emitHeld();
   }
 
