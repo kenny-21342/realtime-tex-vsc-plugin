@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Text in the preview can be selected and copied: each page carries an invisible text layer over the words the canvas draws, including paragraphs updated live. Suggested by EvanMa1 (HenryXiaoYang/realtime-tex-vsc-plugin#19).
+- New `realtimeTex.env` setting: environment variables for rtex and TeX, with `${mainDir}` and `${workspaceFolder}`. Set the `TEXMFHOME` or `TEXINPUTS` your own build uses (LaTeX Workshop's tools, a `.latexmkrc`) so the preview and **Export PDF** read the project's own `texmf` folder too (HenryXiaoYang/realtime-tex-vsc-plugin#14).
+- The build files no longer fill the drive VS Code keeps them on: from the next fork release of rtex (0.0.15) they link to the files of the main file's folder instead of copying the whole folder, three times over (HenryXiaoYang/realtime-tex-vsc-plugin#13, HenryXiaoYang/realtime-tex-vsc-plugin#15). Run **Realtime TeX: Update rtex Engine** once it is released.
+- Internal link navigation keeps up to 50 previous positions. Use the mouse back button to return; positions adapt to zoom changes and are cleared when the document resets.
+- Hyperlinks in the preview: the link annotations of the background PDF (`\href`, `\url`, `\ref`, table of contents, …) are laid over the pages. Clicking one opens the URL or jumps within the document. Works on pages drawn from display lists too, and links under a paragraph being edited stay hidden until the next full compile so they cannot point at moved text.
+- PDF links are parsed in a worker from the displayed layout's PDF snapshot. Link areas and destinations account for page rotation and cropping; visible link nodes are reused to preserve keyboard focus.
+- The extension is now called **Realtime TeX** (upstream's rename; its id stays
+  `henryxiaoyang.realtime-tex`). Upstream's release workflow also publishes to the VS Code
+  Marketplace; in this fork that step is skipped, and releases stay on GitHub.
+- Hyperlinks and the text layer follow the fork's turned (landscape) pages: both layers are
+  turned with the canvas.
 - **Preview This File Only** previews one file of a project on its own. A file with its own `\documentclass` is previewed as it is; a file without one is wrapped in the new `realtimeTex.previewTemplate` setting (a plain `article` by default), with its paths resolved from the main file's folder. Suggested by EvanMa1 (HenryXiaoYang/realtime-tex-vsc-plugin#9).
 - Double-clicking the preview now jumps to the source even when that paragraph comes from a file no editor has open, such as an `\include`d chapter. Before, it said "No source paragraph found". Thanks to Steve-Li-1998 (HenryXiaoYang/realtime-tex-vsc-plugin#7).
 - CI: the build and the end-to-end suite (Linux, macOS, Windows) also run on pull requests, not
